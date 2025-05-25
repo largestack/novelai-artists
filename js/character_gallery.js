@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (img.model == 'nai-diffusion-4-full')
             img.modelName = 'NAI Diffusion 4 Full';
-        else if (img.model == 'nAI-diffusion-4-curated-preview')
+        else if (img.model == 'nai-diffusion-4-curated-preview')
             img.modelName = 'NAI Diffusion 4 Curated Preview';
         else if (img.model == 'nai-diffusion-4-5-curated')
             img.modelName = 'NAI Diffusion 4.5 Curated';
