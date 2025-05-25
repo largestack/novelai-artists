@@ -28,18 +28,18 @@ GALLERY_SECTIONS = [
         "name": "Women",
         "file": "1girl.txt",
         "max_images": 21000,
-        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/images/full", # Main display images
-        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/images/thumb", # Main display images
-        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/images/raw" # Raw images (PNGs from API, or copied old fulls)
+        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Main display images
+        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Main display images
+        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw" # Raw images (PNGs from API, or copied old fulls)
     },
     {
         "id": "men",
         "name": "Men",
         "file": "1boy.txt",
         "max_images": 5000,
-        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/images/full", # Main display images
-        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/images/thumb", # Main display images
-        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/images/raw" # Raw images (PNGs from API, or copied old fulls)
+        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Main display images
+        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Main display images
+        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw" # Raw images (PNGs from API, or copied old fulls)
     }
 ]
 
@@ -314,6 +314,7 @@ def generate_section_images(section_config, character_descriptions, artists, tem
             else:
                 print(f"  Skipping stale/invalid item: {item.get('id', 'Unknown ID')}.")
                 print(f"  Missing files: {full_path_str} or {thumb_path_str} or {raw_path_str}.")
+                exit()
                 paths = [full_path_str, thumb_path_str, raw_path_str]
                 for path in paths:
                     if path and os.path.exists(path):

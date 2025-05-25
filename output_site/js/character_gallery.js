@@ -3,8 +3,8 @@
  */
 
 const GALLERY_IMAGE_THUMB_SCALE_PERCENT = 100; // Target image width as % of its original width. Adjust as needed.
-const THUMB_PATH = "./images/thumb/"; // Path to thumbnail images
-const FULL_PATH = "./images/full/"; // Path to full images
+const THUMB_PATH = "https://novelai-images.s3.us-east-005.backblazeb2.com/thumb/"; // Path to thumbnail images
+const FULL_PATH = "https://novelai-images.s3.us-east-005.backblazeb2.com/full/"; // Path to full images
 
 document.addEventListener('DOMContentLoaded', function() {
     // Elements
