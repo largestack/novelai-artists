@@ -1,1 +1,6 @@
-{"version": 2}
+{
+  "buildCommand": null,
+  "outputDirectory": "./output_site",
+  "installCommand": null,
+  "devCommand": null
+}

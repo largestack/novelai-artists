@@ -15,7 +15,8 @@ import hashlib
 import glob
 
 # Configuration
-OUTPUT_DIR = "./output"
+OUTPUT_SITE_DIR = "./output_site"
+OUTPUT_IMAGES_DIR = "./output_images"
 ARTISTS_FILE = "artists.txt"
 TEMPLATE_FILE = "template.prompt"
 API_URL = "https://image.novelai.net"
@@ -27,18 +28,18 @@ GALLERY_SECTIONS = [
         "name": "Women",
         "file": "1girl.txt",
         "max_images": 21000,
-        "images_dir_full": f"{OUTPUT_DIR}/images/full", # Main display images
-        "images_dir_thumb": f"{OUTPUT_DIR}/images/thumb", # Main display images
-        "images_dir_raw": f"{OUTPUT_DIR}/images/raw" # Raw images (PNGs from API, or copied old fulls)
+        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/images/full", # Main display images
+        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/images/thumb", # Main display images
+        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/images/raw" # Raw images (PNGs from API, or copied old fulls)
     },
     {
         "id": "men",
         "name": "Men",
         "file": "1boy.txt",
         "max_images": 5000,
-        "images_dir_full": f"{OUTPUT_DIR}/images/full", # Main display images
-        "images_dir_thumb": f"{OUTPUT_DIR}/images/thumb", # Main display images
-        "images_dir_raw": f"{OUTPUT_DIR}/images/raw" # Raw images (PNGs from API, or copied old fulls)
+        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/images/full", # Main display images
+        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/images/thumb", # Main display images
+        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/images/raw" # Raw images (PNGs from API, or copied old fulls)
     }
 ]
 
@@ -57,7 +58,8 @@ MODELS = [
 
 def setup_directories():
     """Setup the output directory structure"""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_SITE_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_IMAGES_DIR, exist_ok=True)
 
     for section in GALLERY_SECTIONS:
         os.makedirs(section["images_dir_full"], exist_ok=True)
@@ -66,7 +68,7 @@ def setup_directories():
 
     for folder in ["css", "js"]:
         src_folder = f"./{folder}"
-        dest_folder = f"{OUTPUT_DIR}/{folder}"
+        dest_folder = f"{OUTPUT_SITE_DIR}/{folder}"
         if os.path.exists(src_folder):
             if os.path.exists(dest_folder):
                 shutil.rmtree(dest_folder)
@@ -234,9 +236,9 @@ def generate_image(prompt, headers, filename_base, model_id,
         return {
             "filename_base": filename_base,
             "filename_stem": filename_stem,
-            "full_path_for_html": os.path.relpath(actual_save_full_path, OUTPUT_DIR),
-            "thumb_path_for_html": os.path.relpath(actual_save_thumb_path, OUTPUT_DIR),
-            "raw_path_for_html": os.path.relpath(actual_save_raw_path, OUTPUT_DIR),
+            "full_path_for_html": os.path.relpath(actual_save_full_path, OUTPUT_SITE_DIR),
+            "thumb_path_for_html": os.path.relpath(actual_save_thumb_path, OUTPUT_SITE_DIR),
+            "raw_path_for_html": os.path.relpath(actual_save_raw_path, OUTPUT_SITE_DIR),
             "seed": seed,
             "model_id": model_id,
             "modelName": next((m["name"] for m in MODELS if m["id"] == model_id), model_id)
@@ -263,7 +265,7 @@ def generate_section_images(section_config, character_descriptions, artists, tem
     images_dir_raw = section_config["images_dir_raw"]
 
     max_images = section_config["max_images"]
-    section_data_file = f"{OUTPUT_DIR}/{section_id}_data.json"
+    section_data_file = f"{OUTPUT_IMAGES_DIR}/{section_id}_data.json"
 
     final_results_for_section = []
     processed_filename_bases = set()
@@ -318,7 +320,7 @@ def generate_section_images(section_config, character_descriptions, artists, tem
                         print(f"  Found file: {path}")
                     else:
                         print(f"  File not found: {path}")
-                paths_abs = [os.path.join(OUTPUT_DIR, path) for path in paths]
+                paths_abs = [os.path.join(OUTPUT_SITE_DIR, path) for path in paths]
                 for path in paths_abs:
                     if os.path.exists(path):
                         print(f"  Found file: {path}")
@@ -477,7 +479,7 @@ def generate_section_html(section_config, images_data, template_text):
     section_id = section_config["id"]
     section_name = section_config["name"]
     title = f"NovelAI Gallery | {section_name}"
-    html_filename = f"{OUTPUT_DIR}/{section_id}.html"
+    html_filename = f"{OUTPUT_SITE_DIR}/{section_id}.html"
 
     safe_template_for_js = json.dumps(template_text)
     # Paths in images_data are already correctly formatted with forward slashes by generate_image/generate_section_images
@@ -626,14 +628,14 @@ def main():
 
         if GALLERY_SECTIONS:
             first_section_html_file = f"{GALLERY_SECTIONS[0]['id']}.html"
-            generate_redirect_html(f"{OUTPUT_DIR}/index.html", first_section_html_file)
+            generate_redirect_html(f"{OUTPUT_SITE_DIR}/index.html", first_section_html_file)
         else:
             placeholder_index_content = "<!DOCTYPE html><html><head><title>Gallery</title></head><body><p>No gallery sections configured.</p></body></html>"
-            with open(f"{OUTPUT_DIR}/index.html", "w", encoding="utf-8") as f: f.write(placeholder_index_content)
+            with open(f"{OUTPUT_SITE_DIR}/index.html", "w", encoding="utf-8") as f: f.write(placeholder_index_content)
             print("No gallery sections defined. Created a placeholder index.html.")
 
-        print(f"\nWebsite generation complete. Files are in: {os.path.abspath(OUTPUT_DIR)}")
-        print(f"Open {os.path.join(os.path.abspath(OUTPUT_DIR), 'index.html')} in your browser.")
+        print(f"\nWebsite generation complete. Files are in: {os.path.abspath(OUTPUT_SITE_DIR)}")
+        print(f"Open {os.path.join(os.path.abspath(OUTPUT_SITE_DIR), 'index.html')} in your browser.")
 
     except FileNotFoundError as e:
         print(f"Error: A required file was not found: {e}")
