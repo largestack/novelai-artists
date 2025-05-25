@@ -7,6 +7,16 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+    <div id="age-disclaimer-overlay" style="display: none;">
+        <div id="age-disclaimer-modal">
+            <h2>Age Verification</h2>
+            <p>You must be 18 years or older to view this content. The images are intended to be SFW, but occasional errors sometimes result in nudity.</p>
+            <p>Please confirm your age to continue.</p>
+            <button id="age-confirm-button">I am 18 or older</button>
+            <button id="age-exit-button">Exit</button>
+        </div>
+    </div>
+
     <header>
         <div class="logo-container">
             <svg class="logo" viewBox="0 0 100 100" width="40" height="40"><circle cx="50" cy="50" r="40" fill="#6c5ce7" /><path d="M30,30 L70,70 M30,70 L70,30" stroke="white" stroke-width="8" stroke-linecap="round" /></svg>
@@ -28,14 +38,13 @@
         <div class="lightbox-content">
             <img id="lightbox-img" src="" alt="Enlarged image">
             <div class="lightbox-info">
-                <h3 id="lightbox-character-name"></h3>
-                <div id="lightbox-tags-container" class="tags-container-modal"></div>
                 <div class="artist-container"><span>Artist: </span><span id="lightbox-artist" title="Click to copy artist" style="cursor:pointer;"></span></div>
-                <div class="model-container"><span>Model: </span><span id="lightbox-model"></span></div>
-                <div class="prompt-container"><h4>Prompt:</h4><pre id="lightbox-prompt"></pre><button id="copy-prompt" class="copy-button">Copy Prompt</button></div>
-                <div class="seed-container"><span>Seed: </span><span id="lightbox-seed"></span></div>
-                <div id="favorite-container" class="favorite-container"><button id="favorite-button" class="favorite-button"><span id="favorite-icon" class="favorite-icon-gfx"></span><span id="favorite-text">Add to Favorites</span></button></div>
                 <div id="lightbox-related-images" class="related-images"></div>
+                <div id="favorite-container" class="favorite-container"><button id="favorite-button" class="favorite-button"><span id="favorite-icon" class="favorite-icon-gfx"></span><span id="favorite-text">Add to Favorites</span></button></div>
+                <div id="lightbox-tags-container" class="tags-container-modal"></div>
+                <div class="prompt-container"><h4>Prompt:</h4><pre id="lightbox-prompt"></pre><button id="copy-prompt" class="copy-button">Copy Prompt</button></div>
+                <div class="model-container"><span>Model: </span><span id="lightbox-model"></span></div>
+                <div class="seed-container"><span>Seed: </span><span id="lightbox-seed"></span></div>                
             </div>
         </div>
     </div>
