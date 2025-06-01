@@ -123,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             // Set default model
-            const defaultModelId = 'nai-diffusion-4-full';
+            const defaultModelId = 'nai-diffusion-4-5-full';
             let defaultModelButton = modelSelectorEl.querySelector(`button[data-model="${defaultModelId}"]`);
             
             if (defaultModelButton) {

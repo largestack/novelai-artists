@@ -27,7 +27,7 @@ GALLERY_SECTIONS = [
         "id": "women",
         "name": "Women",
         "file": "1girl.txt",
-        "max_images": 21000,
+        "max_images": 26000,
         "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Main display images
         "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Main display images
         "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw" # Raw images (PNGs from API, or copied old fulls)
@@ -54,6 +54,7 @@ MODELS = [
     {"id": "nai-diffusion-4-full", "name": "NAI Diffusion 4 Full"},
     {"id": "nai-diffusion-4-curated-preview", "name": "NAI Diffusion 4 Curated"},
     {"id": "nai-diffusion-4-5-curated", "name": "NAI Diffusion 4.5 Curated"},
+    {"id": "nai-diffusion-4-5-full", "name": "NAI Diffusion 4.5 Full"},
 ]
 
 def setup_directories():
@@ -547,8 +548,8 @@ def generate_section_html(section_config, images_data, template_text):
             <img id="lightbox-img" src="" alt="Enlarged image">
             <div class="lightbox-info">
                 <div class="artist-container"><span>Artist: </span><span id="lightbox-artist" title="Click to copy artist" style="cursor:pointer;"></span></div>
-                <div id="lightbox-related-images" class="related-images"></div>
                 <div id="favorite-container" class="favorite-container"><button id="favorite-button" class="favorite-button"><span id="favorite-icon" class="favorite-icon-gfx"></span><span id="favorite-text">Add to Favorites</span></button></div>
+                <div id="lightbox-related-images" class="related-images"></div>
                 <div id="lightbox-tags-container" class="tags-container-modal"></div>
                 <div class="prompt-container"><h4>Prompt:</h4><pre id="lightbox-prompt"></pre><button id="copy-prompt" class="copy-button">Copy Prompt</button></div>
                 <div class="model-container"><span>Model: </span><span id="lightbox-model"></span></div>
