@@ -27,7 +27,7 @@ GALLERY_SECTIONS = [
         "id": "women",
         "name": "Women",
         "file": "1girl.txt",
-        "max_images": 26000,
+        "max_images": 35000,
         "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Main display images
         "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Main display images
         "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw" # Raw images (PNGs from API, or copied old fulls)
@@ -259,8 +259,6 @@ def generate_character_prompt(character_desc, artist_name, template):
 
 def generate_section_images(section_config, character_descriptions, artists, template, headers):
     section_id = section_config["id"]
-    # For "women", thumbs_dir_abs will be the same as images_dir_abs.
-    # For "men", it will be output/men_images/thumbs.
     images_dir_full = section_config["images_dir_full"]
     images_dir_thumb = section_config["images_dir_thumb"]
     images_dir_raw = section_config["images_dir_raw"]
@@ -274,61 +272,59 @@ def generate_section_images(section_config, character_descriptions, artists, tem
     items_in_json_file = 0
     loaded_data_from_json = []
 
+    NEW_GENERATION_MODEL_ID = "nai-diffusion-4-5-full" # Define the sole model for new generations
+
     if os.path.exists(section_data_file):
         print(f"Loading existing data from {section_data_file} for section '{section_id}'")
         with open(section_data_file, "r", encoding="utf-8") as f:
             loaded_data_from_json = json.load(f)
         items_in_json_file = len(loaded_data_from_json)
 
-        # Process loaded items, checking for validity and populating final_results_for_section
         for item in loaded_data_from_json:
             if 'filename_base' not in item or not item['filename_base']:
                 id_val = item.get('id', '')
-                full_val = item.get('full', '')
+                full_val = item.get('full', '') # Retained for historical context if needed, not primary path logic
                 potential_stem_from_id = id_val if '.' not in id_val and '_' in id_val else None
                 base_name_with_seed = potential_stem_from_id or (os.path.splitext(os.path.basename(full_val))[0] if full_val else "")
                 if base_name_with_seed:
                     parts = base_name_with_seed.split('_')
-                    if len(parts) > 1 and parts[-1].isdigit():
+                    if len(parts) > 1 and parts[-1].isdigit(): # Check if last part is seed-like
                         item['filename_base'] = '_'.join(parts[:-1])
+                    else: # If not, the whole stem might be the base (older format?)
+                        item['filename_base'] = base_name_with_seed 
+            
+            # Construct paths based on item 'id' (which is filename_stem) and section specific dirs
+            # Item 'id' is expected to be filename_stem (e.g., women_hash_model_seed)
+            filename_stem = item.get('id')
+            if not filename_stem:
+                print(f"  Skipping stale/invalid item due to missing 'id': {item}")
+                continue
 
-            #full_path_str = item.get('full', '')
-            #thumb_path_str = item.get('thumb', '')
-            #raw_path_str = item.get('raw_image', '')
+            # Ensure 'model' field exists for display and counting, default if missing for very old items
+            if 'model' not in item:
+                item['model'] = "unknown_model" # Or try to infer from filename_stem if possible
 
-            full_path_str = os.path.join(images_dir_full, item.get('id', '') + ".jpg")
-            thumb_path_str = os.path.join(images_dir_thumb, item.get('id', '') + ".jpg")
-            raw_path_str = os.path.join(images_dir_raw, item.get('id', '') + ".png")
-            if not raw_path_str or not os.path.exists(raw_path_str):
-                raw_path_str = os.path.join(images_dir_raw, item.get('id', '') + ".jpg")
-                if not os.path.exists(raw_path_str):
-                    raw_path_str = None
+            full_path_str = os.path.join(images_dir_full, f"{filename_stem}.jpg")
+            thumb_path_str = os.path.join(images_dir_thumb, f"{filename_stem}.jpg")
+            raw_path_str = os.path.join(images_dir_raw, f"{filename_stem}.png")
+            if not os.path.exists(raw_path_str): # Fallback to .jpg for raw if .png not found (e.g. manually added)
+                raw_path_str = os.path.join(images_dir_raw, f"{filename_stem}.jpg")
 
             if os.path.exists(full_path_str) and \
                os.path.exists(thumb_path_str) and \
-               os.path.exists(raw_path_str):
+               os.path.exists(raw_path_str) and \
+               item.get('filename_base'): # Ensure filename_base was derived or exists
                 if len(final_results_for_section) < max_images:
                     final_results_for_section.append(item)
                     processed_filename_bases.add(item['filename_base'])
                 else:
                     break
             else:
-                print(f"  Skipping stale/invalid item: {item.get('id', 'Unknown ID')}.")
-                print(f"  Missing files: {full_path_str} or {thumb_path_str} or {raw_path_str}.")
-                exit()
-                paths = [full_path_str, thumb_path_str, raw_path_str]
-                for path in paths:
-                    if path and os.path.exists(path):
-                        print(f"  Found file: {path}")
-                    else:
-                        print(f"  File not found: {path}")
-                paths_abs = [os.path.join(OUTPUT_SITE_DIR, path) for path in paths]
-                for path in paths_abs:
-                    if os.path.exists(path):
-                        print(f"  Found file: {path}")
-                    else:
-                        print(f"  File not found: {path}")
-                exit()
+                print(f"  Skipping stale/invalid item: {filename_stem}.")
+                if not item.get('filename_base'): print("    Reason: Missing filename_base.")
+                if not os.path.exists(full_path_str): print(f"    Missing: {full_path_str}")
+                if not os.path.exists(thumb_path_str): print(f"    Missing: {thumb_path_str}")
+                if not os.path.exists(raw_path_str): print(f"    Missing: {raw_path_str} (checked .png and .jpg)")
         
         if items_in_json_file > 0 and len(final_results_for_section) < items_in_json_file:
              print(f"Note: From {items_in_json_file} items in JSON, {len(final_results_for_section)} were valid and loaded. Others were stale/invalid or exceeded max_images.")
@@ -337,24 +333,27 @@ def generate_section_images(section_config, character_descriptions, artists, tem
         if len(final_results_for_section) >= max_images:
              print(f"Max images ({max_images}) for section '{section_id}' reached from JSON data. No new generation needed.")
 
-    # Determine if loading and filtering changed the data (e.g. stale entries removed)
     data_changed_during_load_filter = items_in_json_file != len(final_results_for_section)
 
-    # Initialize counters for (Model, Artist) combinations
     model_artist_counts = {
         (model["id"], artist): 0 for model in MODELS for artist in artists
     }
 
-    # Count existing images by (Model+Artist) combinations
     for item in final_results_for_section:
-        model_id = item.get("model")
+        model_id = item.get("model") # This could be any model_id from old generations
         artist = item.get("artist")
-        if (model_id, artist) in model_artist_counts:
-            model_artist_counts[(model_id, artist)] += 1
+        # Ensure model_id is valid before using as key
+        if any(m["id"] == model_id for m in MODELS) and artist in artists:
+            if (model_id, artist) in model_artist_counts:
+                 model_artist_counts[(model_id, artist)] += 1
+            # else: # Should not happen if initialized correctly
+            #    model_artist_counts[(model_id, artist)] = 1 
+        elif model_id and artist : # Log if model or artist not in current known set (e.g. artist removed from artists.txt)
+            print(f"  Note: Existing item for model '{model_id}' and artist '{artist}' found, but this combination is not in current active generation sets (artist/model list changed?). It will be kept but not used for balancing new generations if model/artist not in lists.")
+
 
     if not artists:
         print(f"Skipping further image processing for section '{section_id}': No artists from {ARTISTS_FILE}.")
-        # Save if filtering occurred even if no artists
         if data_changed_during_load_filter:
             with open(section_data_file, "w", encoding="utf-8") as f:
                 json.dump(final_results_for_section, f, indent=2)
@@ -372,7 +371,7 @@ def generate_section_images(section_config, character_descriptions, artists, tem
     num_slots_to_fill = max_images - len(final_results_for_section)
     if num_slots_to_fill <= 0:
         print(f"Section '{section_id}' is already full ({len(final_results_for_section)}/{max_images} images). No new images will be generated.")
-        if data_changed_during_load_filter: # Save if filtering occurred
+        if data_changed_during_load_filter:
             with open(section_data_file, "w", encoding="utf-8") as f:
                 json.dump(final_results_for_section, f, indent=2)
             print(f"Saved updated data (due to filtering) to {section_data_file} for section '{section_id}'.")
@@ -380,83 +379,102 @@ def generate_section_images(section_config, character_descriptions, artists, tem
 
     available_descriptions = character_descriptions.copy()
     random.shuffle(available_descriptions)
-
     newly_added_images_count = 0
-    model_idx_counter = 0
 
-    # Start generating new images
-    print(f"Attempting to generate up to {num_slots_to_fill} new {section_id} images, balancing Model+Artist combinations.")
+    print(f"Attempting to generate up to {num_slots_to_fill} new {section_id} images, using model '{NEW_GENERATION_MODEL_ID}' and balancing artists.")
 
-    for desc_idx, char_desc in enumerate(available_descriptions):
+    for char_desc in available_descriptions:
         if newly_added_images_count >= num_slots_to_fill:
             print(f"Reached target of {num_slots_to_fill} new images for section '{section_id}'. Stopping further generation.")
             break
 
-        # Find the least-represented (Model, Artist) combination
-        min_count = min(model_artist_counts.values())
-        eligible_combinations = [comb for comb, count in model_artist_counts.items() if count == min_count]
+        # Artist selection: Balance artists for the NEW_GENERATION_MODEL_ID
+        counts_for_new_gen_model_artist = {}
+        for artist_name in artists: # artists is the full list of available artists
+            counts_for_new_gen_model_artist[artist_name] = model_artist_counts.get((NEW_GENERATION_MODEL_ID, artist_name), 0)
+        
+        min_artist_count = min(counts_for_new_gen_model_artist.values())
+        eligible_artists = [
+            artist_name for artist_name, count in counts_for_new_gen_model_artist.items()
+            if count == min_artist_count
+        ]
+        selected_artist = random.choice(eligible_artists)
+        
+        actual_model_for_generation = NEW_GENERATION_MODEL_ID
 
-        if not eligible_combinations:
-            print("Error: No valid (Model, Artist) combinations available to generate new images.")
-            break
-
-        selected_model, selected_artist = random.choice(eligible_combinations)
-
-        # Generate prompt and filename
         prompt_text = generate_character_prompt(char_desc, selected_artist, template)
-        prompt_plus_model_str = prompt_text + selected_model
+        prompt_plus_model_str = prompt_text + actual_model_for_generation # Hash includes the specific model
         prompt_hash = hashlib.md5(prompt_plus_model_str.encode("utf-8")).hexdigest()[:10]
 
-        model_identifier = selected_model.replace("nai-diffusion-", "").replace("-", "_")
-        filename_base = f"{section_id}_{prompt_hash}_{model_identifier}"
+        model_identifier_for_filename = actual_model_for_generation.replace("nai-diffusion-", "").replace("-", "_")
+        filename_base = f"{section_id}_{prompt_hash}_{model_identifier_for_filename}"
 
         if filename_base in processed_filename_bases:
+            # This (description, artist, model) combination has already been loaded or processed.
+            # This could happen if a previous run generated it and it was loaded.
             continue
 
-        # Check for existing image files
-        existing_image_files = glob.glob(os.path.join(images_dir_thumb, f"{filename_base}_*.jpg"))
-        if existing_image_files:
-            print(f"Using existing image for (Model: {selected_model}, Artist: {selected_artist}) with filename {filename_base}.")
-            # (Unchanged code for using existing files)
-        else:
-            # Generate new image via API
-            image_details = generate_image(
-                prompt_text,
-                headers,
-                filename_base,
-                selected_model,
-                images_dir_full=images_dir_full,
-                images_dir_thumb=images_dir_thumb,
-                images_dir_raw=images_dir_raw
-            )
+        # Check if files for this exact filename_base already exist (e.g., from an interrupted run)
+        # This glob looks for files like section_promptHash_modelIdentifier_seed.jpg
+        # We are interested if *any* seed variant of this filename_base exists.
+        # A more precise check would be if filename_base itself resulted in an image already added.
+        # The processed_filename_bases set handles cases where data is in JSON.
+        # This glob is for files on disk not yet in JSON.
+        # If we find such files, we assume this prompt+artist+model combo is "done" for this pass.
+        # Note: This logic might be refined later if we want to generate multiple seeds for the same base.
+        # For now, if any file for this base exists, we skip generating another for this base.
+        potential_existing_raw_glob = os.path.join(images_dir_raw, f"{filename_base}_*.png")
+        potential_existing_thumb_glob = os.path.join(images_dir_thumb, f"{filename_base}_*.jpg")
+
+        if glob.glob(potential_existing_raw_glob) or glob.glob(potential_existing_thumb_glob):
+            print(f"  Skipping generation for filename_base '{filename_base}': Files already exist on disk (e.g., from a previous run). Add to JSON manually or remove files to regenerate.")
+            # Add to processed_filename_bases to avoid re-checking in this run
+            processed_filename_bases.add(filename_base)
+            continue
+        
+        if headers is None: # Should only happen if --no-generate was passed and we still try to generate
+            print("  Skipping API call because headers are not available (e.g. --no-generate or login failed).")
+            continue
+
+
+        print(f"  Generating image for: {char_desc[:60]}... (Artist: {selected_artist}, Model: {actual_model_for_generation})")
+        image_details = generate_image(
+            prompt_text,
+            headers,
+            filename_base, # This filename_base is specific to actual_model_for_generation
+            actual_model_for_generation, # Explicitly pass the new model ID
+            images_dir_full=images_dir_full,
+            images_dir_thumb=images_dir_thumb,
+            images_dir_raw=images_dir_raw
+        )
 
         if not image_details:
-            # Skip on failure
-            time.sleep(3)
+            time.sleep(1) # Wait a bit after an API error before trying next
             continue
 
         # Add newly created/generated image details
-        image_data = {
-            "id": image_details["filename_stem"],
+        image_data_to_store = {
+            "id": image_details["filename_stem"], # e.g., section_promptHash_model_seed
+            "filename_base": image_details["filename_base"], # Storing for consistency
             "artist": selected_artist,
-            "prompt": prompt_text,
-            "model": selected_model,
+            "prompt": prompt_text, 
+            "model": image_details["model_id"], # This will be NEW_GENERATION_MODEL_ID
+            "seed": image_details["seed"],
+            # The paths for HTML are not stored in JSON anymore, they are derived.
+            # UI will construct paths: images_dir_X + id + .ext
         }
-        final_results_for_section.append(image_data)
-        processed_filename_bases.add(filename_base)
+        final_results_for_section.append(image_data_to_store)
+        processed_filename_bases.add(filename_base) # Add base of newly generated image
 
         # Update the Model+Artist balancing counts
-        model_artist_counts[(selected_model, selected_artist)] += 1
+        model_artist_counts[(actual_model_for_generation, selected_artist)] = model_artist_counts.get((actual_model_for_generation, selected_artist), 0) + 1
         newly_added_images_count += 1
 
-        # Save incrementally
         with open(section_data_file, "w", encoding="utf-8") as f:
             json.dump(final_results_for_section, f, indent=2)
+        
+        time.sleep(0.1) # Rate-limit API requests
 
-        # Rate-limit API requests
-        time.sleep(0.1)
-
-    # Save final data and return
     with open(section_data_file, "w", encoding="utf-8") as f:
         json.dump(final_results_for_section, f, indent=2)
     print(f"Section '{section_id}': Added {newly_added_images_count} new images. Total: {len(final_results_for_section)}.")
