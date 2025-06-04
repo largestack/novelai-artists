@@ -27,7 +27,7 @@ GALLERY_SECTIONS = [
         "id": "women",
         "name": "Women",
         "file": "1girl.txt",
-        "max_images": 35000,
+        "max_images": 45000,
         "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Main display images
         "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Main display images
         "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw" # Raw images (PNGs from API, or copied old fulls)
@@ -40,6 +40,63 @@ GALLERY_SECTIONS = [
         "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Main display images
         "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Main display images
         "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw" # Raw images (PNGs from API, or copied old fulls)
+    }
+]#!/usr/bin/env python3
+import os
+import json
+import base64
+import random
+import shutil
+import requests
+from PIL import Image
+import io
+import argparse
+import time
+import zipfile
+from dotenv import load_dotenv
+import hashlib
+import glob
+
+# Configuration
+OUTPUT_SITE_DIR = "./output_site"
+OUTPUT_IMAGES_DIR = "./output_images" # Base for _data.json files and SFW images
+NSFW_IMAGES_DIR_BASE = f"{OUTPUT_IMAGES_DIR}/nsfw_gallery" # Dedicated base for NSFW images
+ARTISTS_FILE = "artists.txt"
+NSFW_PROMPTS_FILE = "nsfw.txt" # For NSFW prompts
+TEMPLATE_FILE = "template.prompt"
+API_URL = "https://image.novelai.net"
+
+# Configuration for different gallery sections
+GALLERY_SECTIONS = [
+    {
+        "id": "women",
+        "name": "Women",
+        "file": "1girl.txt",
+        "max_images": 45000,
+        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Original path for SFW
+        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Original path for SFW
+        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw", # Original path for SFW
+        "is_nsfw": False
+    },
+    {
+        "id": "men",
+        "name": "Men",
+        "file": "1boy.txt",
+        "max_images": 5000,
+        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Original path for SFW
+        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Original path for SFW
+        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw", # Original path for SFW
+        "is_nsfw": False
+    },
+    {
+        "id": "nsfw",
+        "name": "NSFW Zone", # Clearly named
+        "file": NSFW_PROMPTS_FILE, # Use the new constant
+        "max_images": 10000, # Example, adjust as needed
+        "images_dir_full": f"{NSFW_IMAGES_DIR_BASE}/full", # Dedicated path
+        "images_dir_thumb": f"{NSFW_IMAGES_DIR_BASE}/thumb", # Dedicated path
+        "images_dir_raw": f"{NSFW_IMAGES_DIR_BASE}/raw", # Dedicated path
+        "is_nsfw": True # Flag for special handling
     }
 ]
 
@@ -57,10 +114,13 @@ MODELS = [
     {"id": "nai-diffusion-4-5-full", "name": "NAI Diffusion 4.5 Full"},
 ]
 
+
+
 def setup_directories():
     """Setup the output directory structure"""
     os.makedirs(OUTPUT_SITE_DIR, exist_ok=True)
-    os.makedirs(OUTPUT_IMAGES_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_IMAGES_DIR, exist_ok=True) # For _data.json files and SFW image folders
+    # NSFW_IMAGES_DIR_BASE will be created implicitly by makedirs for section["images_dir_full"] etc. if needed
 
     for section in GALLERY_SECTIONS:
         os.makedirs(section["images_dir_full"], exist_ok=True)
@@ -169,10 +229,16 @@ def login(api_key=None):
         raise Exception("Authentication failed.")
 
 def generate_image(prompt, headers, filename_base, model_id,
-                   images_dir_full, images_dir_thumb, images_dir_raw):
+                   images_dir_full, images_dir_thumb, images_dir_raw, is_nsfw_section=False): # Added is_nsfw_section
     seed = random.randint(1, 2147483647)
     base_prompt = f"{prompt}, no text, best quality, masterpiece, very aesthetic, absurdres"
-    negative_prompt = "nsfw, blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, white blank page, blank page"
+    
+    if is_nsfw_section:
+        # For NSFW, remove "nsfw" from negative, and add other common undesired tags for adult content
+        negative_prompt = "blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, white blank page, blank page, shota, child"
+    else:
+        # Standard SFW negative prompt
+        negative_prompt = "nsfw, blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, white blank page, blank page"
 
     payload = {
         "input": base_prompt, "model": model_id, "action": "generate",
@@ -212,23 +278,22 @@ def generate_image(prompt, headers, filename_base, model_id,
         # Save raw PNG image
         raw_png_filename = f"{filename_stem}.png"
         actual_save_raw_path = os.path.join(images_dir_raw, raw_png_filename)
-        os.makedirs(images_dir_thumb, exist_ok=True)
+        os.makedirs(images_dir_raw, exist_ok=True) # Ensure raw directory exists
         with open(actual_save_raw_path, "wb") as f:
             f.write(image_bytes)
 
         # Save full-size display JPEG
         jpeg_filename = f"{filename_stem}.jpg"
         actual_save_full_path = os.path.join(images_dir_full, jpeg_filename)
+        os.makedirs(images_dir_full, exist_ok=True) # Ensure full directory exists
         full_size = (int(img.width * 0.7), int(img.height * 0.7))
         img_full = img.copy()
         img_full.thumbnail(full_size, Image.Resampling.LANCZOS)
         img_full.convert("RGB").save(actual_save_full_path, "JPEG", quality=80)
 
         # Save thumbnail JPEG
-        # For "women", custom_thumbs_dir will be custom_images_dir.
-        # For "men", custom_thumbs_dir will be .../men_images/thumb
         actual_save_thumb_path = os.path.join(images_dir_thumb, jpeg_filename)
-        # Reduction in size for thumbnail
+        os.makedirs(images_dir_thumb, exist_ok=True) # Ensure thumb directory exists
         thumb_size = (int(img.width * 0.35), int(img.height * 0.35))
         img_thumb = img.copy()
         img_thumb.thumbnail(thumb_size, Image.Resampling.LANCZOS)
@@ -237,9 +302,9 @@ def generate_image(prompt, headers, filename_base, model_id,
         return {
             "filename_base": filename_base,
             "filename_stem": filename_stem,
-            "full_path_for_html": os.path.relpath(actual_save_full_path, OUTPUT_SITE_DIR),
-            "thumb_path_for_html": os.path.relpath(actual_save_thumb_path, OUTPUT_SITE_DIR),
-            "raw_path_for_html": os.path.relpath(actual_save_raw_path, OUTPUT_SITE_DIR),
+            "full_path_for_html": os.path.relpath(actual_save_full_path, OUTPUT_SITE_DIR).replace(os.sep, '/'),
+            "thumb_path_for_html": os.path.relpath(actual_save_thumb_path, OUTPUT_SITE_DIR).replace(os.sep, '/'),
+            "raw_path_for_html": os.path.relpath(actual_save_raw_path, OUTPUT_SITE_DIR).replace(os.sep, '/'),
             "seed": seed,
             "model_id": model_id,
             "modelName": next((m["name"] for m in MODELS if m["id"] == model_id), model_id)
@@ -262,6 +327,7 @@ def generate_section_images(section_config, character_descriptions, artists, tem
     images_dir_full = section_config["images_dir_full"]
     images_dir_thumb = section_config["images_dir_thumb"]
     images_dir_raw = section_config["images_dir_raw"]
+    is_nsfw = section_config.get("is_nsfw", False) # Get NSFW flag
 
     max_images = section_config["max_images"]
     section_data_file = f"{OUTPUT_IMAGES_DIR}/{section_id}_data.json"
@@ -272,7 +338,7 @@ def generate_section_images(section_config, character_descriptions, artists, tem
     items_in_json_file = 0
     loaded_data_from_json = []
 
-    NEW_GENERATION_MODEL_ID = "nai-diffusion-4-5-full" # Define the sole model for new generations
+    NEW_GENERATION_MODEL_ID = "nai-diffusion-4-5-full" 
 
     if os.path.exists(section_data_file):
         print(f"Loading existing data from {section_data_file} for section '{section_id}'")
@@ -283,37 +349,37 @@ def generate_section_images(section_config, character_descriptions, artists, tem
         for item in loaded_data_from_json:
             if 'filename_base' not in item or not item['filename_base']:
                 id_val = item.get('id', '')
-                full_val = item.get('full', '') # Retained for historical context if needed, not primary path logic
+                full_val = item.get('full', '') 
                 potential_stem_from_id = id_val if '.' not in id_val and '_' in id_val else None
                 base_name_with_seed = potential_stem_from_id or (os.path.splitext(os.path.basename(full_val))[0] if full_val else "")
                 if base_name_with_seed:
                     parts = base_name_with_seed.split('_')
-                    if len(parts) > 1 and parts[-1].isdigit(): # Check if last part is seed-like
+                    if len(parts) > 1 and parts[-1].isdigit(): 
                         item['filename_base'] = '_'.join(parts[:-1])
-                    else: # If not, the whole stem might be the base (older format?)
+                    else: 
                         item['filename_base'] = base_name_with_seed 
             
-            # Construct paths based on item 'id' (which is filename_stem) and section specific dirs
-            # Item 'id' is expected to be filename_stem (e.g., women_hash_model_seed)
             filename_stem = item.get('id')
             if not filename_stem:
                 print(f"  Skipping stale/invalid item due to missing 'id': {item}")
                 continue
 
-            # Ensure 'model' field exists for display and counting, default if missing for very old items
-            if 'model' not in item:
-                item['model'] = "unknown_model" # Or try to infer from filename_stem if possible
+            if 'model' not in item: item['model'] = "unknown_model"
 
             full_path_str = os.path.join(images_dir_full, f"{filename_stem}.jpg")
             thumb_path_str = os.path.join(images_dir_thumb, f"{filename_stem}.jpg")
             raw_path_str = os.path.join(images_dir_raw, f"{filename_stem}.png")
-            if not os.path.exists(raw_path_str): # Fallback to .jpg for raw if .png not found (e.g. manually added)
-                raw_path_str = os.path.join(images_dir_raw, f"{filename_stem}.jpg")
+            if not os.path.exists(raw_path_str): 
+                raw_path_str_jpg = os.path.join(images_dir_raw, f"{filename_stem}.jpg")
+                if os.path.exists(raw_path_str_jpg):
+                    raw_path_str = raw_path_str_jpg # Fallback to JPG if PNG not found for raw
+                # If neither .png nor .jpg exists for raw, the condition below will fail it.
+
 
             if os.path.exists(full_path_str) and \
                os.path.exists(thumb_path_str) and \
                os.path.exists(raw_path_str) and \
-               item.get('filename_base'): # Ensure filename_base was derived or exists
+               item.get('filename_base'): 
                 if len(final_results_for_section) < max_images:
                     final_results_for_section.append(item)
                     processed_filename_bases.add(item['filename_base'])
@@ -324,7 +390,7 @@ def generate_section_images(section_config, character_descriptions, artists, tem
                 if not item.get('filename_base'): print("    Reason: Missing filename_base.")
                 if not os.path.exists(full_path_str): print(f"    Missing: {full_path_str}")
                 if not os.path.exists(thumb_path_str): print(f"    Missing: {thumb_path_str}")
-                if not os.path.exists(raw_path_str): print(f"    Missing: {raw_path_str} (checked .png and .jpg)")
+                if not os.path.exists(raw_path_str): print(f"    Missing raw file for {filename_stem} (checked .png and .jpg at {os.path.join(images_dir_raw, filename_stem)})")
         
         if items_in_json_file > 0 and len(final_results_for_section) < items_in_json_file:
              print(f"Note: From {items_in_json_file} items in JSON, {len(final_results_for_section)} were valid and loaded. Others were stale/invalid or exceeded max_images.")
@@ -340,17 +406,13 @@ def generate_section_images(section_config, character_descriptions, artists, tem
     }
 
     for item in final_results_for_section:
-        model_id = item.get("model") # This could be any model_id from old generations
+        model_id = item.get("model") 
         artist = item.get("artist")
-        # Ensure model_id is valid before using as key
         if any(m["id"] == model_id for m in MODELS) and artist in artists:
             if (model_id, artist) in model_artist_counts:
                  model_artist_counts[(model_id, artist)] += 1
-            # else: # Should not happen if initialized correctly
-            #    model_artist_counts[(model_id, artist)] = 1 
-        elif model_id and artist : # Log if model or artist not in current known set (e.g. artist removed from artists.txt)
-            print(f"  Note: Existing item for model '{model_id}' and artist '{artist}' found, but this combination is not in current active generation sets (artist/model list changed?). It will be kept but not used for balancing new generations if model/artist not in lists.")
-
+        elif model_id and artist : 
+            print(f"  Note: Existing item for model '{model_id}' and artist '{artist}' found, but this combination is not in current active generation sets. It will be kept.")
 
     if not artists:
         print(f"Skipping further image processing for section '{section_id}': No artists from {ARTISTS_FILE}.")
@@ -388,9 +450,8 @@ def generate_section_images(section_config, character_descriptions, artists, tem
             print(f"Reached target of {num_slots_to_fill} new images for section '{section_id}'. Stopping further generation.")
             break
 
-        # Artist selection: Balance artists for the NEW_GENERATION_MODEL_ID
         counts_for_new_gen_model_artist = {}
-        for artist_name in artists: # artists is the full list of available artists
+        for artist_name in artists: 
             counts_for_new_gen_model_artist[artist_name] = model_artist_counts.get((NEW_GENERATION_MODEL_ID, artist_name), 0)
         
         min_artist_count = min(counts_for_new_gen_model_artist.values())
@@ -403,77 +464,65 @@ def generate_section_images(section_config, character_descriptions, artists, tem
         actual_model_for_generation = NEW_GENERATION_MODEL_ID
 
         prompt_text = generate_character_prompt(char_desc, selected_artist, template)
-        prompt_plus_model_str = prompt_text + actual_model_for_generation # Hash includes the specific model
+        prompt_text = prompt_text.strip()  # Clean up whitespace
+        if is_nsfw:
+            prompt_text = f"{prompt_text}, nsfw, uncensored"  # Add nsfw tag for NSFW sections
+        prompt_plus_model_str = prompt_text + actual_model_for_generation 
         prompt_hash = hashlib.md5(prompt_plus_model_str.encode("utf-8")).hexdigest()[:10]
 
         model_identifier_for_filename = actual_model_for_generation.replace("nai-diffusion-", "").replace("-", "_")
         filename_base = f"{section_id}_{prompt_hash}_{model_identifier_for_filename}"
 
         if filename_base in processed_filename_bases:
-            # This (description, artist, model) combination has already been loaded or processed.
-            # This could happen if a previous run generated it and it was loaded.
             continue
 
-        # Check if files for this exact filename_base already exist (e.g., from an interrupted run)
-        # This glob looks for files like section_promptHash_modelIdentifier_seed.jpg
-        # We are interested if *any* seed variant of this filename_base exists.
-        # A more precise check would be if filename_base itself resulted in an image already added.
-        # The processed_filename_bases set handles cases where data is in JSON.
-        # This glob is for files on disk not yet in JSON.
-        # If we find such files, we assume this prompt+artist+model combo is "done" for this pass.
-        # Note: This logic might be refined later if we want to generate multiple seeds for the same base.
-        # For now, if any file for this base exists, we skip generating another for this base.
         potential_existing_raw_glob = os.path.join(images_dir_raw, f"{filename_base}_*.png")
         potential_existing_thumb_glob = os.path.join(images_dir_thumb, f"{filename_base}_*.jpg")
 
         if glob.glob(potential_existing_raw_glob) or glob.glob(potential_existing_thumb_glob):
-            print(f"  Skipping generation for filename_base '{filename_base}': Files already exist on disk (e.g., from a previous run). Add to JSON manually or remove files to regenerate.")
-            # Add to processed_filename_bases to avoid re-checking in this run
+            print(f"  Skipping generation for filename_base '{filename_base}': Files already exist on disk.")
             processed_filename_bases.add(filename_base)
             continue
         
-        if headers is None: # Should only happen if --no-generate was passed and we still try to generate
+        if headers is None: 
             print("  Skipping API call because headers are not available (e.g. --no-generate or login failed).")
             continue
 
-
-        print(f"  Generating image for: {char_desc[:60]}... (Artist: {selected_artist}, Model: {actual_model_for_generation})")
+        print(f"  Generating image for: {char_desc[:60]}... (Artist: {selected_artist}, Model: {actual_model_for_generation}, NSFW: {is_nsfw})")
         image_details = generate_image(
             prompt_text,
             headers,
-            filename_base, # This filename_base is specific to actual_model_for_generation
-            actual_model_for_generation, # Explicitly pass the new model ID
+            filename_base, 
+            actual_model_for_generation, 
             images_dir_full=images_dir_full,
             images_dir_thumb=images_dir_thumb,
-            images_dir_raw=images_dir_raw
+            images_dir_raw=images_dir_raw,
+            is_nsfw_section=is_nsfw # Pass the flag here
         )
 
         if not image_details:
-            time.sleep(1) # Wait a bit after an API error before trying next
+            time.sleep(1) 
             continue
 
-        # Add newly created/generated image details
         image_data_to_store = {
-            "id": image_details["filename_stem"], # e.g., section_promptHash_model_seed
-            "filename_base": image_details["filename_base"], # Storing for consistency
+            "id": image_details["filename_stem"], 
+            "filename_base": image_details["filename_base"], 
             "artist": selected_artist,
             "prompt": prompt_text, 
-            "model": image_details["model_id"], # This will be NEW_GENERATION_MODEL_ID
+            "model": image_details["model_id"], 
             "seed": image_details["seed"],
-            # The paths for HTML are not stored in JSON anymore, they are derived.
-            # UI will construct paths: images_dir_X + id + .ext
+            "modelName": image_details["modelName"] # Ensure modelName is included
         }
         final_results_for_section.append(image_data_to_store)
-        processed_filename_bases.add(filename_base) # Add base of newly generated image
+        processed_filename_bases.add(filename_base) 
 
-        # Update the Model+Artist balancing counts
         model_artist_counts[(actual_model_for_generation, selected_artist)] = model_artist_counts.get((actual_model_for_generation, selected_artist), 0) + 1
         newly_added_images_count += 1
 
         with open(section_data_file, "w", encoding="utf-8") as f:
             json.dump(final_results_for_section, f, indent=2)
         
-        time.sleep(0.1) # Rate-limit API requests
+        time.sleep(0.1) 
 
     with open(section_data_file, "w", encoding="utf-8") as f:
         json.dump(final_results_for_section, f, indent=2)
@@ -495,36 +544,59 @@ def generate_redirect_html(output_path, target_url):
     with open(output_path, "w", encoding="utf-8") as f: f.write(html_content)
     print(f"Generated redirect page: {output_path} -> {target_url}")
 
-def generate_section_html(section_config, images_data, template_text):
+def generate_section_html(section_config, images_data, template_text, all_gallery_sections_for_nav):
     section_id = section_config["id"]
     section_name = section_config["name"]
+    is_nsfw_page = section_config.get("is_nsfw", False)
     title = f"NovelAI Gallery | {section_name}"
     html_filename = f"{OUTPUT_SITE_DIR}/{section_id}.html"
 
     safe_template_for_js = json.dumps(template_text)
-    # Paths in images_data are already correctly formatted with forward slashes by generate_image/generate_section_images
-    # Limit images_data to key fields for the HTML page
-    images_data = [
-        {
+    
+    images_data_for_js = []
+    for img in images_data:
+        # Ensure modelName is present, falling back to model ID if necessary
+        model_name = img.get("modelName", img.get("model", "unknown_model"))
+        if not model_name and "model" in img: # if modelName was empty but model exists
+             model_name = next((m["name"] for m in MODELS if m["id"] == img["model"]), img["model"])
+
+        images_data_for_js.append({
             "id": img["id"],
-            "artist": img["artist"],
-            "model": img["model"],
-            "prompt": img["prompt"],
+            "artist": img.get("artist", "N/A"),
+            "model": img.get("model", "unknown_model"),
+            "modelName": model_name, # Use resolved model_name
+            "prompt": img.get("prompt", ""),
             "seed": img.get("seed", ""),
-        }
-        for img in images_data
-    ]
-    serialized_images_data = json.dumps(images_data)
+        })
+    serialized_images_data = json.dumps(images_data_for_js)
 
     nav_links_html = ""
-    for s_nav in GALLERY_SECTIONS:
+    # Use all_gallery_sections_for_nav to ensure all configured sections appear in nav,
+    # respecting the original GALLERY_SECTIONS order and definitions.
+    for s_nav in all_gallery_sections_for_nav:
         is_active = 'class="active"' if s_nav["id"] == section_id else ''
-        nav_links_html += f'\n                    <li {is_active}><a href="{s_nav["id"]}.html">{s_nav["name"]}</a></li>'
+        link_href = f'{s_nav["id"]}.html'
+        if s_nav.get("is_nsfw", False): # If the section itself is NSFW
+            link_href = f'{s_nav["id"]}_landing.html' # Link to its landing page
+        nav_links_html += f'\n                    <li {is_active}><a href="{link_href}">{s_nav["name"]}</a></li>'
+
+    # Determine if the age disclaimer should be actively shown for this specific page
+    # The JS handles localStorage check, but we can control initial display style if needed
+    # For an NSFW page, we ensure the disclaimer elements are present.
+    # The existing JS logic will handle showing it if not accepted.
+    age_disclaimer_display_style = "display: none;" # Default for SFW or if JS handles it
+    if is_nsfw_page:
+        # The JS script `character_gallery.js` already has logic to show the disclaimer
+        # if not accepted. So, we just ensure it's in the HTML.
+        # The style "display: none;" allows JS to control visibility.
+        pass
+
 
     js_data_assignment = f"""const galleryData = {{
             "sectionImages": {serialized_images_data},
             "template": {safe_template_for_js},
-            "section": "{section_id}"
+            "section": "{section_id}",
+            "isNsfwSection": {json.dumps(is_nsfw_page)}
         }};"""
 
     html_content = f"""<!DOCTYPE html>
@@ -536,10 +608,10 @@ def generate_section_html(section_config, images_data, template_text):
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div id="age-disclaimer-overlay" style="display: none;">
+    <div id="age-disclaimer-overlay" style="{age_disclaimer_display_style}">
         <div id="age-disclaimer-modal">
             <h2>Age Verification</h2>
-            <p>You must be 18 years or older to view this content. The images are intended to be SFW, but occasional errors sometimes result in nudity.</p>
+            <p>You must be 18 years or older to view this content. {'The images in this section may be explicit and are intended for mature audiences only.' if is_nsfw_page else 'The images are intended to be SFW, but occasional errors sometimes result in nudity.'}</p>
             <p>Please confirm your age to continue.</p>
             <button id="age-confirm-button">I am 18 or older</button>
             <button id="age-exit-button">Exit</button>
@@ -584,11 +656,56 @@ def generate_section_html(section_config, images_data, template_text):
     with open(html_filename, "w", encoding="utf-8") as f: f.write(html_content)
     print(f"Generated section page: {html_filename}")
 
+# New function to generate NSFW landing page
+def generate_nsfw_landing_page(output_site_dir, nsfw_section_id, nsfw_section_name):
+    nsfw_gallery_url = f"{nsfw_section_id}.html" # Actual gallery page
+    landing_page_filename = f"{output_site_dir}/{nsfw_section_id}_landing.html"
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warning: {nsfw_section_name} Content</title>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        body {{ display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; text-align: center; background-color: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 1rem;}}
+        .disclaimer-box {{ background-color: #24243e; padding: 2rem 3rem; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 650px; border: 1px solid #4a4a70; }}
+        .disclaimer-box h1 {{ color: #ff4757; margin-bottom: 1.5rem; font-size: 2rem; text-transform: uppercase; letter-spacing: 1px;}}
+        .disclaimer-box p {{ margin-bottom: 1.5rem; line-height: 1.7; font-size: 1.05rem; }}
+        .disclaimer-box strong {{ color: #ffa502; }}
+        .disclaimer-box .actions a {{ display: inline-block; background-color: #2ecc71; color: white; padding: 0.9rem 1.8rem; text-decoration: none; border-radius: 5px; margin: 0.5rem; transition: background-color 0.2s ease-in-out, transform 0.2s ease; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }}
+        .disclaimer-box .actions a:hover {{ background-color: #27ae60; transform: translateY(-2px); }}
+        .disclaimer-box .actions a.exit {{ background-color: #7f8c8d; }}
+        .disclaimer-box .actions a.exit:hover {{ background-color: #6c7a7b; }}
+        .warning-icon {{ font-size: 2.5rem; margin-bottom: 1rem; color: #ff4757; }}
+    </style>
+</head>
+<body>
+    <div class="disclaimer-box">
+        <div class="warning-icon"><span role="img" aria-label="warning">🔞</span></div>
+        <h1>Adult Content Warning</h1>
+        <p>The section "<strong>{nsfw_section_name}</strong>" you are about to enter contains material that is sexually explicit and intended for adult audiences only. This content may be considered Not Safe For Work (NSFW).</p>
+        <p>You must be <strong>18 years of age or older</strong> (or the legal age of majority in your jurisdiction) to access this content. If you are not of legal age, or if such material offends you or is illegal to view in your location, please do not proceed.</p>
+        <p>By clicking "<strong>Enter Site (I Confirm I Am 18+)</strong>", you affirm that you meet these age requirements, that you understand the nature of the content, and that you are choosing to view it voluntarily.</p>
+        <div class="actions">
+            <a href="{nsfw_gallery_url}">Enter Site (I Confirm I Am 18+)</a>
+            <a href="index.html" class="exit">Exit to Main Page</a>
+        </div>
+    </div>
+</body>
+</html>"""
+    with open(landing_page_filename, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    print(f"Generated NSFW landing page: {landing_page_filename} for section '{nsfw_section_name}'")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate a static gallery website with NovelAI images")
     parser.add_argument("--api-key", help="NovelAI API key (overrides .env or cached tokens)")
     parser.add_argument("--no-generate", action="store_true", help="Skip image generation, only build website from existing data.")
     parser.add_argument("--create-env-template", action="store_true", help="Create a template .env file and exit.")
+    parser.add_argument("--generate-nsfw", action="store_true", help="Only generate images and content for NSFW sections.")
     args = parser.parse_args()
 
     if args.create_env_template:
@@ -611,33 +728,43 @@ def main():
         template_text = read_template()
         artists = read_artists()
 
+        sections_to_process = GALLERY_SECTIONS
+        if args.generate_nsfw:
+            sections_to_process = [s for s in GALLERY_SECTIONS if s.get("is_nsfw", False)]
+            if not sections_to_process:
+                print("NSFW generation requested (--generate-nsfw), but no NSFW sections are configured in GALLERY_SECTIONS. Exiting.")
+                return
+            print("Processing NSFW sections only due to --generate-nsfw flag.")
+
         section_descriptions = {}
-        for section_config in GALLERY_SECTIONS:
+        for section_config in sections_to_process: # Only load descriptions for sections we process
             desc = read_section_descriptions(section_config["file"])
             section_descriptions[section_config["id"]] = desc
             print(f"Found {len(desc)} descriptions in {section_config['file']} for section '{section_config['id']}'.")
+            if not desc:
+                 print(f"Warning: No descriptions loaded for '{section_config['id']}' from {section_config['file']}. Section might be empty if no existing data.")
+
 
         headers = None
         if not args.no_generate:
-            if not artists: print("Warning: No artists found. Image generation requiring artists will be limited, but existing data might be processed.")
+            if not artists: print("Warning: No artists found. Image generation requiring artists will be limited.")
             try:
                 headers = login(args.api_key)
             except Exception as e:
                 print(f"Login failed: {e}. Cannot generate images. Try with --no-generate or fix login.")
-                args.no_generate = True
+                args.no_generate = True # Force no-generate mode if login fails
 
         print("\n--- Processing Gallery Sections ---")
         all_sections_data = {}
 
-        for section_config in GALLERY_SECTIONS:
+        for section_config in sections_to_process:
             section_id = section_config["id"]
             print(f"\nProcessing section: {section_config['name']}")
 
-            # Always call generate_section_images. It handles loading, and conditional generation.
             current_section_data = generate_section_images(
                 section_config,
                 section_descriptions.get(section_id, []),
-                artists if headers and not args.no_generate else [],
+                artists if headers and not args.no_generate else [], # Pass empty list if no headers/no_generate
                 template_text,
                 headers if not args.no_generate else None
             )
@@ -645,19 +772,67 @@ def main():
 
         print("\n--- Generating HTML Pages ---")
         loaded_any_data_for_html = False
-        for section_config in GALLERY_SECTIONS:
+        for section_config in sections_to_process: # Only generate HTML for processed sections
             section_id = section_config["id"]
             images_data_for_html = all_sections_data.get(section_id, [])
-            if images_data_for_html:
-                loaded_any_data_for_html = True
-            generate_section_html(section_config, images_data_for_html, template_text)
+            
+            # If --no-generate, we might not have data if JSON was missing. Load it if not already loaded.
+            if args.no_generate and not images_data_for_html:
+                section_data_file = f"{OUTPUT_IMAGES_DIR}/{section_id}_data.json"
+                if os.path.exists(section_data_file):
+                    try:
+                        with open(section_data_file, "r", encoding="utf-8") as f:
+                            images_data_for_html = json.load(f)
+                        all_sections_data[section_id] = images_data_for_html # Store it
+                        print(f"Loaded data for section '{section_id}' from JSON for HTML generation (as --no-generate was used).")
+                    except json.JSONDecodeError:
+                        print(f"Error: Could not decode JSON from {section_data_file} for HTML generation.")
+                else:
+                    print(f"Warning: No data file ({section_data_file}) found for section '{section_id}' and --no-generate was used. HTML page may be empty or skip generation.")
 
-        if args.no_generate and not loaded_any_data_for_html:
-             print("Warning: --no-generate was used (or login failed), and no existing valid data files (*_data.json) were found or processed. Site may be empty.")
+            if images_data_for_html or not args.no_generate : # Generate HTML if data exists, or if we are in generation mode (might create empty page)
+                loaded_any_data_for_html = True if images_data_for_html else loaded_any_data_for_html
+                generate_section_html(section_config, images_data_for_html, template_text, GALLERY_SECTIONS) # Pass ALL sections for nav
+            else:
+                print(f"Skipping HTML generation for section '{section_id}' as no data was loaded/generated.")
 
+
+        # Generate NSFW landing pages for *all* configured NSFW sections, regardless of --generate-nsfw filter for processing.
+        # This ensures landing pages exist if the sections are defined.
+        for section_config in GALLERY_SECTIONS:
+            if section_config.get("is_nsfw", False):
+                generate_nsfw_landing_page(OUTPUT_SITE_DIR, section_config["id"], section_config["name"])
+
+
+        if args.no_generate and not loaded_any_data_for_html and not sections_to_process:
+             print("Warning: --no-generate was used, and no sections were processed (e.g. --generate-nsfw with no NSFW sections). Site may be incomplete.")
+        elif args.no_generate and not loaded_any_data_for_html and sections_to_process:
+             print(f"Warning: --no-generate was used, and no existing valid data files (*_data.json) were found or processed for the active sections. Site may be empty for: {[s['id'] for s in sections_to_process]}.")
+
+
+        # Determine redirect for index.html based on original GALLERY_SECTIONS
         if GALLERY_SECTIONS:
-            first_section_html_file = f"{GALLERY_SECTIONS[0]['id']}.html"
-            generate_redirect_html(f"{OUTPUT_SITE_DIR}/index.html", first_section_html_file)
+            first_sfw_section = next((s for s in GALLERY_SECTIONS if not s.get("is_nsfw", False)), None)
+            first_nsfw_section = next((s for s in GALLERY_SECTIONS if s.get("is_nsfw", False)), None)
+            
+            redirect_target_url = None
+            if first_sfw_section:
+                redirect_target_url = f"{first_sfw_section['id']}.html"
+            elif first_nsfw_section: # If no SFW sections, redirect to first NSFW landing page
+                redirect_target_url = f"{first_nsfw_section['id']}_landing.html"
+            
+            if redirect_target_url:
+                generate_redirect_html(f"{OUTPUT_SITE_DIR}/index.html", redirect_target_url)
+            elif sections_to_process: # Fallback if only specific (e.g. nsfw) sections were processed and no general rule matched
+                first_processed_section = sections_to_process[0]
+                target_url = f"{first_processed_section['id']}.html"
+                if first_processed_section.get("is_nsfw"):
+                    target_url = f"{first_processed_section['id']}_landing.html"
+                generate_redirect_html(f"{OUTPUT_SITE_DIR}/index.html", target_url)
+            else: # No sections at all
+                placeholder_index_content = "<!DOCTYPE html><html><head><title>Gallery</title></head><body><p>No gallery sections configured or processed.</p></body></html>"
+                with open(f"{OUTPUT_SITE_DIR}/index.html", "w", encoding="utf-8") as f: f.write(placeholder_index_content)
+                print("No gallery sections defined or processed. Created a placeholder index.html.")
         else:
             placeholder_index_content = "<!DOCTYPE html><html><head><title>Gallery</title></head><body><p>No gallery sections configured.</p></body></html>"
             with open(f"{OUTPUT_SITE_DIR}/index.html", "w", encoding="utf-8") as f: f.write(placeholder_index_content)
