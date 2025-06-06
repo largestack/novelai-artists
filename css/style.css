@@ -6,9 +6,35 @@
   --text-color: #2d3436;
   --card-background: #ffffff;
   --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --header-background: var(--primary-color);
+  --nav-background: var(--card-background);
+  --pre-background: #f5f5f5;
+  --button-background: #f0f0f0;
+  --button-border: #ddd;
+  --tag-background: #e9ecef;
+  --tag-text: #495057;
+  --tag-border: #ced4da;
   --max-width: 1400px;
   --heart-color: #ff6b81;
   --heart-color-inactive: #ddd;
+}
+
+body.dark-mode {
+  --primary-color: #8a7ff9;
+  --secondary-color: #6c5ce7;
+  --background-color: #121212;
+  --text-color: #e0e0e0;
+  --card-background: #1e1e1e;
+  --card-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+  --header-background: #1e1e1e;
+  --nav-background: #2a2a2a;
+  --pre-background: #2a2a2a;
+  --button-background: #333;
+  --button-border: #555;
+  --tag-background: #3a3a3a;
+  --tag-text: #e0e0e0;
+  --tag-border: #555;
+  --heart-color-inactive: #444;
 }
 
 * {
@@ -25,7 +51,7 @@ body {
 }
 
 header {
-  background-color: var(--primary-color);
+  background-color: var(--header-background);
   color: white;
   padding: 1rem;
   position: sticky;
@@ -36,6 +62,7 @@ header {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
+  transition: transform 0.3s ease-in-out, background-color 0.3s ease;
 }
 
 .logo-container {
@@ -48,6 +75,11 @@ header {
   width: 40px;
   height: 40px;
 }
+/* In dark mode, make the logo's inner shape visible against the dark header */
+body.dark-mode .logo circle {
+  fill: var(--primary-color);
+}
+
 
 header h1 {
   margin-bottom: 0;
@@ -64,10 +96,11 @@ header h1 {
 
 .controls input[type="search"] {
   padding: 0.35rem 0.75rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--button-border);
   border-radius: 4px;
   font-size: 0.9rem;
-  background-color: white;
+  background-color: var(--card-background);
+  color: var(--text-color);
   min-width: 200px;
 }
 
@@ -102,7 +135,7 @@ header h1 {
 
 .template-info pre {
   padding: 0.5rem;
-  background-color: #f5f5f5;
+  background-color: var(--pre-background);
   border-radius: 4px;
   overflow-x: auto;
   white-space: pre-wrap;
@@ -200,15 +233,15 @@ header h1 {
 }
 
 .lightbox .close {
-  position: absolute;
-  top: 15px; /* Ensure it's within the padded area of .lightbox */
-  right: 20px; /* Ensure it's within the padded area of .lightbox */
+  position: fixed;
+  top: 15px;
+  right: 20px;
   font-size: 35px;
   color: white;
   cursor: pointer;
-  z-index: 1002; /* Above lightbox content and its potential scrollbars */
-  text-shadow: 0 0 5px rgba(0, 0, 0, 0.7), 0 0 3px rgba(0,0,0,0.9); /* UPDATED for better visibility */
-  line-height: 1; /* Prevents odd spacing */
+  z-index: 1002;
+  text-shadow: 0 0 5px rgba(0, 0, 0, 0.7), 0 0 3px rgba(0,0,0,0.9);
+  line-height: 1;
 }
 
 
@@ -223,7 +256,7 @@ header h1 {
   border-radius: 8px;
   overflow-y: auto; 
   overflow-x: hidden;
-  z-index: 1001; /* Ensure content is below close button */
+  z-index: 1001;
 }
 
 .lightbox-content img {
@@ -231,7 +264,8 @@ header h1 {
   height: auto; 
   max-width: 100%; 
   object-fit: contain;
-  display: block; 
+  display: block;
+  cursor: zoom-in;
 }
 
 .lightbox-info {
@@ -246,8 +280,8 @@ header h1 {
 
 .clickable-tag-modal {
   display: inline-block;
-  background-color: #e9ecef;
-  color: #495057;
+  background-color: var(--tag-background);
+  color: var(--tag-text);
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   margin-right: 0.3rem;
@@ -255,7 +289,7 @@ header h1 {
   font-size: 0.85rem;
   cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease;
-  border: 1px solid #ced4da;
+  border: 1px solid var(--tag-border);
 }
 
 .clickable-tag-modal:hover {
@@ -271,7 +305,7 @@ header h1 {
 .prompt-container h4 { margin-bottom: 0.3rem; font-size: 1rem; }
 
 .prompt-container pre {
-  background-color: #f5f5f5;
+  background-color: var(--pre-background);
   padding: 0.75rem;
   border-radius: 4px;
   overflow-x: auto;
@@ -290,7 +324,6 @@ header h1 {
 .artist-container #lightbox-artist:hover {
   text-decoration-color: var(--primary-color);
 }
-
 
 /* Loading indicator */
 .loading {
@@ -317,9 +350,9 @@ header h1 {
 }
 
 .model-button {
-  background-color: #f0f0f0; 
+  background-color: var(--button-background); 
   color: var(--text-color);
-  border: 1px solid #ddd;
+  border: 1px solid var(--button-border);
   border-radius: 4px;
   padding: 0.5rem 1rem;
   cursor: pointer;
@@ -337,7 +370,7 @@ header h1 {
   background-color: var(--primary-color);
   color: white;
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px white, 0 0 0 4px var(--primary-color);
+  box-shadow: 0 0 0 2px var(--card-background), 0 0 0 4px var(--primary-color);
 }
 
 /* Toast notification */
@@ -352,7 +385,7 @@ header h1 {
   border-radius: 4px;
   opacity: 0;
   transition: opacity 0.3s ease, bottom 0.3s ease;
-  z-index: 2000; /* Above age disclaimer if it were somehow active */
+  z-index: 2000;
   pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
@@ -362,13 +395,54 @@ header h1 {
   bottom: 30px;
 }
 
-/* Responsive adjustments */
+/* Fullscreen Image Viewer */
+.fullscreen-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.95);
+  z-index: 2000;
+  cursor: zoom-out;
+  justify-content: center;
+  align-items: center;
+}
+.fullscreen-overlay.visible {
+  display: flex;
+}
+.fullscreen-overlay img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
 
+
+/* Responsive adjustments */
 @media (max-width: 767px) { /* Mobile */
-  .lightbox-content img {
-    max-height: 50vh; 
-    flex-shrink: 0; 
+  header.header-hidden {
+    transform: translateY(-100%);
   }
+
+  .lightbox {
+    padding: 0;
+  }
+  .lightbox-content {
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .lightbox-content img {
+    max-height: 65vh; /* Larger image */
+    width: 100%;
+    object-fit: contain;
+  }
+  .lightbox .close {
+    top: 10px;
+    right: 15px;
+  }
+
   .image-grid {
     padding: 0.5rem;
     gap: 0.5rem;
@@ -415,11 +489,12 @@ header h1 {
 .site-navigation nav ul {
   display: flex;
   list-style: none;
-  background-color: var(--card-background);
+  background-color: var(--nav-background);
   border-radius: 8px;
   box-shadow: var(--card-shadow);
   overflow: hidden;
-  padding-left: 0; 
+  padding-left: 0;
+  transition: background-color 0.3s ease;
 }
 
 .site-navigation nav ul li a {
@@ -466,7 +541,7 @@ header h1 {
 .related-images {
   margin-top: 1.5rem; 
   padding-top: 1rem;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--button-border);
 }
 
 .related-images h4 {
@@ -477,7 +552,6 @@ header h1 {
 
 .related-images-grid {
   display: grid;
-  /* UPDATED: Increased min-width for larger related thumbnails. */
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); 
   gap: 0.75rem; 
 }
@@ -490,7 +564,7 @@ header h1 {
   border-radius: 4px;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  border: 1px solid #eee;
+  border: 1px solid var(--button-border);
 }
 
 .related-image:hover {
@@ -510,19 +584,25 @@ header h1 {
 .favorite-button {
   display: flex;
   align-items: center;
-  background-color: #f5f5f5;
-  border: 1px solid #ddd;
+  background-color: var(--button-background);
+  border: 1px solid var(--button-border);
   border-radius: 4px;
   padding: 0.5rem 1rem;
   cursor: pointer;
   transition: all 0.3s ease;
   font-size: 0.9rem;
+  color: var(--text-color);
 }
 
 .favorite-button:hover {
   background-color: #e0e0e0;
   border-color: #ccc;
 }
+body.dark-mode .favorite-button:hover {
+    background-color: #444;
+    border-color: #666;
+}
+
 .favorite-button.favorited {
     background-color: var(--heart-color-inactive);
     border-color: var(--heart-color);
@@ -555,7 +635,7 @@ header h1 {
     width: 100%;
     height: 100%;
     background-color: rgba(0, 0, 0, 0.92); 
-    z-index: 3000; /* Ensure it's above everything else like toasts */
+    z-index: 3000;
     display: flex; 
     justify-content: center;
     align-items: center;
@@ -606,4 +686,26 @@ header h1 {
 }
 #age-disclaimer-modal button#age-exit-button:hover {
     background-color: #555;
+}
+
+/* Theme Button */
+.theme-button {
+  background-color: transparent;
+  color: white;
+  border: 1px solid white;
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  font-size: 1.4rem;
+  cursor: pointer;
+  transition: background-color 0.3s, transform 0.2s;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  line-height: 1; /* Center the emoji better */
+}
+.theme-button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
 }

@@ -580,17 +580,8 @@ def generate_section_html(section_config, images_data, template_text, all_galler
             link_href = f'{s_nav["id"]}_landing.html' # Link to its landing page
         nav_links_html += f'\n                    <li {is_active}><a href="{link_href}">{s_nav["name"]}</a></li>'
 
-    # Determine if the age disclaimer should be actively shown for this specific page
-    # The JS handles localStorage check, but we can control initial display style if needed
-    # For an NSFW page, we ensure the disclaimer elements are present.
-    # The existing JS logic will handle showing it if not accepted.
-    age_disclaimer_display_style = "display: none;" # Default for SFW or if JS handles it
-    if is_nsfw_page:
-        # The JS script `character_gallery.js` already has logic to show the disclaimer
-        # if not accepted. So, we just ensure it's in the HTML.
-        # The style "display: none;" allows JS to control visibility.
-        pass
-
+    # The age disclaimer is always included but hidden by default. JS will control its visibility.
+    age_disclaimer_display_style = "display: none;"
 
     js_data_assignment = f"""const galleryData = {{
             "sectionImages": {serialized_images_data},
@@ -627,6 +618,7 @@ def generate_section_html(section_config, images_data, template_text, all_galler
         <div class="controls">
             <input type="search" id="search-box" placeholder="Search tags or artists...">
             <button id="favorites-toggle" class="action-button">Show Favorites</button>
+            <button id="theme-toggle" class="theme-button" title="Toggle Dark/Light Mode"></button>
         </div>
     </header>
     <div class="template-info"><h2>Base Prompt Template</h2><pre id="template-text"></pre></div>
@@ -647,6 +639,7 @@ def generate_section_html(section_config, images_data, template_text, all_galler
             </div>
         </div>
     </div>
+    <div id="fullscreen-overlay" class="fullscreen-overlay"><img id="fullscreen-img" src="" alt="Fullscreen image"></div>
     <div id="loading" class="loading">Loading more images...</div>
     <script>{js_data_assignment}</script>
     <script src="js/character_gallery.js"></script>
@@ -655,6 +648,8 @@ def generate_section_html(section_config, images_data, template_text, all_galler
 
     with open(html_filename, "w", encoding="utf-8") as f: f.write(html_content)
     print(f"Generated section page: {html_filename}")
+
+
 
 # New function to generate NSFW landing page
 def generate_nsfw_landing_page(output_site_dir, nsfw_section_id, nsfw_section_name):
