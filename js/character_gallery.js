@@ -7,6 +7,7 @@ const THUMB_PATH = "https://f005.backblazeb2.com/file/novelai-images/thumb/";
 const FULL_PATH = "https://f005.backblazeb2.com/file/novelai-images/full/";
 const AGE_DISCLAIMER_KEY = 'ageDisclaimerAccepted_v1';
 const THEME_KEY = 'site_theme_v1';
+const HEADER_REVEAL_THRESHOLD_PX = 250; // Approx 3 small images. Adjust as needed.
 
 document.addEventListener('DOMContentLoaded', function() {
 
@@ -19,44 +20,51 @@ document.addEventListener('DOMContentLoaded', function() {
     function applyTheme(theme) {
         if (theme === 'dark') {
             bodyEl.classList.add('dark-mode');
-            if (themeToggleBtn) themeToggleBtn.textContent = '☀️'; // Show sun icon, clicking it will switch to light
+            if (themeToggleBtn) themeToggleBtn.textContent = '☀️';
         } else {
             bodyEl.classList.remove('dark-mode');
-            if (themeToggleBtn) themeToggleBtn.textContent = '🌙'; // Show moon icon, clicking it will switch to dark
+            if (themeToggleBtn) themeToggleBtn.textContent = '🌙';
         }
     }
 
     // Initialize theme
     let savedTheme = localStorage.getItem(THEME_KEY);
     if (!savedTheme) {
-        savedTheme = 'dark'; // Default to dark mode for new visitors
+        savedTheme = 'dark';
     }
     applyTheme(savedTheme);
 
-    // Attach the click event listener for the theme button
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener('click', () => {
             const isDarkMode = bodyEl.classList.contains('dark-mode');
-            const newTheme = isDarkMode ? 'light' : 'dark'; // Invert the current theme
+            const newTheme = isDarkMode ? 'light' : 'dark';
             localStorage.setItem(THEME_KEY, newTheme);
             applyTheme(newTheme);
         });
     }
 
-    // Header hide/show on mobile scroll
+    // Header hide/show on mobile scroll with delay
     let lastScrollTop = 0;
+    let upwardScrollDistance = 0;
     window.addEventListener('scroll', function() {
-        if (!headerEl) return;
+        if (!headerEl || window.innerWidth >= 768) return; // Only on mobile
+        
         let scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-        if (window.innerWidth < 768) { // Only on mobile devices
-            if (scrollTop > lastScrollTop && scrollTop > headerEl.offsetHeight) {
-                // Downscroll - hide header
+
+        if (scrollTop > lastScrollTop) {
+            // Scrolling Down
+            if (scrollTop > headerEl.offsetHeight) {
                 headerEl.classList.add('header-hidden');
-            } else {
-                // Upscroll - show header
+            }
+            upwardScrollDistance = 0; // Reset upward scroll counter
+        } else if (scrollTop < lastScrollTop) {
+            // Scrolling Up
+            upwardScrollDistance += lastScrollTop - scrollTop;
+            if (upwardScrollDistance > HEADER_REVEAL_THRESHOLD_PX || scrollTop <= headerEl.offsetHeight) {
                 headerEl.classList.remove('header-hidden');
             }
         }
+        
         lastScrollTop = scrollTop <= 0 ? 0 : scrollTop;
     }, false);
 
@@ -81,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function() {
             localStorage.setItem(AGE_DISCLAIMER_KEY, 'true');
             overlay.style.display = 'none';
             document.body.style.overflow = '';
-            initializeGallery(); // Proceed to initialize gallery after confirmation
+            initializeGallery();
         };
 
         exitBtn.onclick = () => {
@@ -186,11 +194,31 @@ document.addEventListener('DOMContentLoaded', function() {
         
         function toggleFavorite(imageId) {
             const imageIdStr = imageId.toString();
-            if (favorites.has(imageIdStr)) favorites.delete(imageIdStr);
-            else favorites.add(imageIdStr);
+            const isCurrentlyFavorite = favorites.has(imageIdStr);
+            const isNowFavorite = !isCurrentlyFavorite;
+
+            if (isNowFavorite) {
+                favorites.add(imageIdStr);
+            } else {
+                favorites.delete(imageIdStr);
+            }
             localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favorites]));
-            updateFavoriteButtonUI(favorites.has(imageIdStr));
-            if (showingFavorites) filterGallery();
+
+            // Update UI on the card in the main gallery
+            const cardIcon = galleryEl.querySelector(`.image-card[data-id="${imageIdStr}"] .favorite-icon-card`);
+            if (cardIcon) {
+                cardIcon.classList.toggle('favorited', isNowFavorite);
+            }
+
+            // Update UI in the lightbox if it's open for this image
+            if (currentLightboxImage && currentLightboxImage.id === imageId) {
+                 updateFavoriteButtonUI(isNowFavorite);
+            }
+
+            // If we're in "favorites only" view and just unfavorited an item, refresh the list
+            if (showingFavorites && !isNowFavorite) {
+                filterGallery();
+            }
         }
         
         function updateFavoriteButtonUI(isFavorite) { 
@@ -229,7 +257,9 @@ document.addEventListener('DOMContentLoaded', function() {
             
             let filteredImages = (model === 'all') ? [...galleryData.sectionImages] : [...(imagesByModel[model] || [])];
             
-            if (showingFavorites) filteredImages = filteredImages.filter(img => favorites.has(img.id.toString()));
+            if (showingFavorites) {
+                filteredImages = filteredImages.filter(img => favorites.has(img.id.toString()));
+            }
             if (currentSearchTerm) {
                 filteredImages = filteredImages.filter(img => 
                     (img.artist && img.artist.toLowerCase().includes(currentSearchTerm)) ||
@@ -266,11 +296,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 const favIconOnCard = document.createElement('div'); 
                 favIconOnCard.className = 'favorite-icon-card';
-                if (favorites.has(img.id.toString())) favIconOnCard.classList.add('favorited');
+                if (favorites.has(img.id.toString())) {
+                    favIconOnCard.classList.add('favorited');
+                }
                 favIconOnCard.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    toggleFavorite(img.id); 
-                    favIconOnCard.classList.toggle('favorited', favorites.has(img.id.toString()));
+                    toggleFavorite(img.id);
                 });
                 imgContainer.appendChild(favIconOnCard);
                 
@@ -294,7 +325,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         function openLightbox(img) {
             currentLightboxImage = img;
-            if (lightboxContentEl) lightboxContentEl.scrollTop = 0; // Reset scroll position
+            if (lightboxContentEl) lightboxContentEl.scrollTop = 0;
 
             lightboxImgEl.src = FULL_PATH + img.id + ".jpg";
             
@@ -373,8 +404,6 @@ document.addEventListener('DOMContentLoaded', function() {
             favoriteButtonEl.addEventListener('click', () => {
                 if (currentLightboxImage) {
                     toggleFavorite(currentLightboxImage.id);
-                    const cardInGallery = galleryEl.querySelector(`.image-card[data-id="${currentLightboxImage.id}"] .favorite-icon-card`);
-                    if (cardInGallery) cardInGallery.classList.toggle('favorited', favorites.has(currentLightboxImage.id.toString()));
                 }
             });
         }
@@ -411,7 +440,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         
-        filterGallery(); // Initial gallery population
+        filterGallery();
     }
 
     // --- Main Initialization Sequence ---
@@ -424,11 +453,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const isNsfw = galleryData.isNsfwSection || false;
         const disclaimerAccepted = localStorage.getItem(AGE_DISCLAIMER_KEY) === 'true';
 
-        // Show disclaimer ONLY on NSFW pages if it hasn't been accepted yet.
         if (isNsfw && !disclaimerAccepted) {
             showAgeDisclaimer();
         } else {
-            // For SFW pages, or for NSFW pages if disclaimer is already accepted, initialize immediately.
             initializeGallery();
         }
     }
