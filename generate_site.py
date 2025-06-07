@@ -92,7 +92,7 @@ GALLERY_SECTIONS = [
         "id": "nsfw",
         "name": "NSFW Zone", # Clearly named
         "file": NSFW_PROMPTS_FILE, # Use the new constant
-        "max_images": 20000, # Example, adjust as needed
+        "max_images": 24000, # Example, adjust as needed
         "images_dir_full": f"{NSFW_IMAGES_DIR_BASE}/full", # Dedicated path
         "images_dir_thumb": f"{NSFW_IMAGES_DIR_BASE}/thumb", # Dedicated path
         "images_dir_raw": f"{NSFW_IMAGES_DIR_BASE}/raw", # Dedicated path
