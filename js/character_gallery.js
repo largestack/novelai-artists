@@ -16,7 +16,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const bodyEl = document.body;
     const headerEl = document.querySelector('header');
 
-    // Theme switching logic
     function applyTheme(theme) {
         if (theme === 'dark') {
             bodyEl.classList.add('dark-mode');
@@ -27,57 +26,42 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Initialize theme
-    let savedTheme = localStorage.getItem(THEME_KEY);
-    if (!savedTheme) {
-        savedTheme = 'dark';
-    }
+    let savedTheme = localStorage.getItem(THEME_KEY) || 'dark';
     applyTheme(savedTheme);
 
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener('click', () => {
-            const isDarkMode = bodyEl.classList.contains('dark-mode');
-            const newTheme = isDarkMode ? 'light' : 'dark';
+            const newTheme = bodyEl.classList.contains('dark-mode') ? 'light' : 'dark';
             localStorage.setItem(THEME_KEY, newTheme);
             applyTheme(newTheme);
         });
     }
 
-    // Header hide/show on mobile scroll with delay
     let lastScrollTop = 0;
     let upwardScrollDistance = 0;
     window.addEventListener('scroll', function() {
-        if (!headerEl || window.innerWidth >= 768) return; // Only on mobile
-        
+        if (!headerEl || window.innerWidth >= 768) return;
         let scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-
         if (scrollTop > lastScrollTop) {
-            // Scrolling Down
-            if (scrollTop > headerEl.offsetHeight) {
-                headerEl.classList.add('header-hidden');
-            }
-            upwardScrollDistance = 0; // Reset upward scroll counter
+            if (scrollTop > headerEl.offsetHeight) headerEl.classList.add('header-hidden');
+            upwardScrollDistance = 0;
         } else if (scrollTop < lastScrollTop) {
-            // Scrolling Up
             upwardScrollDistance += lastScrollTop - scrollTop;
             if (upwardScrollDistance > HEADER_REVEAL_THRESHOLD_PX || scrollTop <= headerEl.offsetHeight) {
                 headerEl.classList.remove('header-hidden');
             }
         }
-        
         lastScrollTop = scrollTop <= 0 ? 0 : scrollTop;
     }, false);
 
 
     // --- Gallery Logic ---
-
     function showAgeDisclaimer() {
         const overlay = document.getElementById('age-disclaimer-overlay');
         const confirmBtn = document.getElementById('age-confirm-button');
         const exitBtn = document.getElementById('age-exit-button');
 
         if (!overlay || !confirmBtn || !exitBtn) {
-            console.error("Age disclaimer HTML elements not found.");
             document.body.innerHTML = "<p style='text-align:center; padding-top: 50px;'>Error: Age verification components are missing.</p>";
             return;
         }
@@ -91,31 +75,24 @@ document.addEventListener('DOMContentLoaded', function() {
             document.body.style.overflow = '';
             initializeGallery();
         };
-
         exitBtn.onclick = () => {
             const modalContent = document.getElementById('age-disclaimer-modal');
-            if (modalContent) {
-                modalContent.innerHTML = '<h2>Access Denied</h2><p>You must be 18 or older to view this content.</p>';
-            }
+            if (modalContent) modalContent.innerHTML = '<h2>Access Denied</h2><p>You must be 18 or older to view this content.</p>';
         };
     }
 
     function initializeGallery() {
-        // Elements
         const galleryEl = document.getElementById('gallery');
         const lightboxEl = document.getElementById('lightbox');
         const lightboxContentEl = document.querySelector('.lightbox-content');
         const lightboxImgEl = document.getElementById('lightbox-img');
-        const lightboxTagsContainerEl = document.getElementById('lightbox-tags-container');
         const lightboxArtistEl = document.getElementById('lightbox-artist');
         const lightboxModelEl = document.getElementById('lightbox-model');
-        const lightboxPromptEl = document.getElementById('lightbox-prompt');
         const lightboxSeedEl = document.getElementById('lightbox-seed');
         const lightboxRelatedImagesContainer = document.getElementById('lightbox-related-images');
         const favoriteTextEl = document.getElementById('favorite-text');
         const favoriteButtonEl = document.getElementById('favorite-button');
         const favoritesToggleBtn = document.getElementById('favorites-toggle');
-        const copyPromptBtn = document.getElementById('copy-prompt');
         const closeBtn = document.querySelector('.lightbox .close');
         const templateTextEl = document.getElementById('template-text');
         const modelSelectorEl = document.getElementById('model-selector');
@@ -123,8 +100,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const searchBoxEl = document.getElementById('search-box');
         const fullscreenOverlay = document.getElementById('fullscreen-overlay');
         const fullscreenImg = document.getElementById('fullscreen-img');
+        const lightboxPromptArea = document.getElementById('lightbox-prompt-area');
 
-        if (!galleryEl || !lightboxEl || !modelSelectorEl) {
+        if (!galleryEl || !lightboxEl || !modelSelectorEl || !lightboxPromptArea) {
             console.error("Essential gallery elements are missing. Check HTML structure.");
             return;
         }
@@ -194,31 +172,13 @@ document.addEventListener('DOMContentLoaded', function() {
         
         function toggleFavorite(imageId) {
             const imageIdStr = imageId.toString();
-            const isCurrentlyFavorite = favorites.has(imageIdStr);
-            const isNowFavorite = !isCurrentlyFavorite;
-
-            if (isNowFavorite) {
-                favorites.add(imageIdStr);
-            } else {
-                favorites.delete(imageIdStr);
-            }
+            const isNowFavorite = !favorites.has(imageIdStr);
+            if (isNowFavorite) favorites.add(imageIdStr); else favorites.delete(imageIdStr);
             localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favorites]));
-
-            // Update UI on the card in the main gallery
             const cardIcon = galleryEl.querySelector(`.image-card[data-id="${imageIdStr}"] .favorite-icon-card`);
-            if (cardIcon) {
-                cardIcon.classList.toggle('favorited', isNowFavorite);
-            }
-
-            // Update UI in the lightbox if it's open for this image
-            if (currentLightboxImage && currentLightboxImage.id === imageId) {
-                 updateFavoriteButtonUI(isNowFavorite);
-            }
-
-            // If we're in "favorites only" view and just unfavorited an item, refresh the list
-            if (showingFavorites && !isNowFavorite) {
-                filterGallery();
-            }
+            if (cardIcon) cardIcon.classList.toggle('favorited', isNowFavorite);
+            if (currentLightboxImage && currentLightboxImage.id === imageId) updateFavoriteButtonUI(isNowFavorite);
+            if (showingFavorites && !isNowFavorite) filterGallery();
         }
         
         function updateFavoriteButtonUI(isFavorite) { 
@@ -256,15 +216,17 @@ document.addEventListener('DOMContentLoaded', function() {
             loadedImagesCount = 0;
             
             let filteredImages = (model === 'all') ? [...galleryData.sectionImages] : [...(imagesByModel[model] || [])];
-            
             if (showingFavorites) {
                 filteredImages = filteredImages.filter(img => favorites.has(img.id.toString()));
             }
             if (currentSearchTerm) {
-                filteredImages = filteredImages.filter(img => 
-                    (img.artist && img.artist.toLowerCase().includes(currentSearchTerm)) ||
-                    (img.prompt && img.prompt.toLowerCase().includes(currentSearchTerm))
-                );
+                filteredImages = filteredImages.filter(img => {
+                    const term = currentSearchTerm;
+                    return (img.artist && img.artist.toLowerCase().includes(term)) ||
+                           (img.prompt && img.prompt.toLowerCase().includes(term)) ||
+                           ('character1' in img && img.character1.toLowerCase().includes(term)) ||
+                           ('character2' in img && img.character2.toLowerCase().includes(term));
+                });
             }
             
             shuffledImages = filteredImages.sort(() => Math.random() - 0.5);
@@ -281,30 +243,20 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (loadingEl) loadingEl.style.display = 'none';
                 return;
             }
-            
             const fragment = document.createDocumentFragment();
             const endIndex = Math.min(loadedImagesCount + count, shuffledImages.length);
-            
             for (let i = loadedImagesCount; i < endIndex; i++) {
                 const img = shuffledImages[i];
                 const card = document.createElement('div');
                 card.className = 'image-card';
                 card.setAttribute('data-id', img.id);
-                
                 const imgContainer = document.createElement('div');
                 imgContainer.className = 'image-container';
-                
                 const favIconOnCard = document.createElement('div'); 
                 favIconOnCard.className = 'favorite-icon-card';
-                if (favorites.has(img.id.toString())) {
-                    favIconOnCard.classList.add('favorited');
-                }
-                favIconOnCard.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    toggleFavorite(img.id);
-                });
+                if (favorites.has(img.id.toString())) favIconOnCard.classList.add('favorited');
+                favIconOnCard.addEventListener('click', (e) => { e.stopPropagation(); toggleFavorite(img.id); });
                 imgContainer.appendChild(favIconOnCard);
-                
                 const imgEl = document.createElement('img');
                 imgEl.src = THUMB_PATH + img.id + ".jpg";
                 imgEl.alt = "Gallery image thumbnail";
@@ -313,11 +265,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 imgEl.style.height = 'auto';
                 imgContainer.appendChild(imgEl);
                 card.appendChild(imgContainer);
-                
                 card.addEventListener('click', () => { openLightbox(img); });
                 fragment.appendChild(card);
             }
-            
             if (galleryEl) galleryEl.appendChild(fragment);
             loadedImagesCount = endIndex;
             if (loadingEl) loadingEl.style.display = loadedImagesCount < shuffledImages.length ? 'block' : 'none';
@@ -326,11 +276,48 @@ document.addEventListener('DOMContentLoaded', function() {
         function openLightbox(img) {
             currentLightboxImage = img;
             if (lightboxContentEl) lightboxContentEl.scrollTop = 0;
-
             lightboxImgEl.src = FULL_PATH + img.id + ".jpg";
             
-            if (lightboxTagsContainerEl) {
-                lightboxTagsContainerEl.innerHTML = ''; 
+            lightboxPromptArea.innerHTML = ''; // Clear previous content
+
+            const createPromptBlock = (title, text, isCombined = false) => {
+                const container = document.createElement('div');
+                container.className = 'prompt-container';
+                if (isCombined) container.style.borderTop = "2px solid var(--button-border)";
+                if (isCombined) container.style.paddingTop = "1rem";
+                
+                const h4 = document.createElement('h4');
+                h4.textContent = title;
+                container.appendChild(h4);
+
+                const pre = document.createElement('pre');
+                pre.textContent = text;
+                container.appendChild(pre);
+
+                const button = document.createElement('button');
+                button.className = 'copy-button';
+                button.textContent = `Copy ${title}`;
+                button.addEventListener('click', () => {
+                    navigator.clipboard.writeText(text).then(() => showToast(`${title} copied!`));
+                });
+                container.appendChild(button);
+                return container;
+            };
+
+            // FIXED CONDITION - check for actual content, not just existence of keys
+            if (img.character1 && img.character2) {
+                // New Format (noncon.html)
+                const combinedPrompt = `by ${img.artist}, very aesthetic, masterpiece, absurdres, no text, ${img.prompt}, ${img.character1}, ${img.character2}`;
+                
+                lightboxPromptArea.appendChild(createPromptBlock('Full Combined Prompt', combinedPrompt, false));
+                lightboxPromptArea.appendChild(createPromptBlock('Scene Prompt', img.prompt, true));
+                lightboxPromptArea.appendChild(createPromptBlock('Character 1', img.character1, false));
+                lightboxPromptArea.appendChild(createPromptBlock('Character 2', img.character2, false));
+
+            } else {
+                // Old Format (backward compatibility)
+                const tagsContainer = document.createElement('div');
+                tagsContainer.className = 'tags-container-modal';
                 const tags = img.prompt.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
                 tags.forEach(tag => {
                     const tagSpan = document.createElement('span');
@@ -344,32 +331,25 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
                         closeLightbox();
                     });
-                    lightboxTagsContainerEl.appendChild(tagSpan);
-                    lightboxTagsContainerEl.appendChild(document.createTextNode(' ')); 
+                    tagsContainer.appendChild(tagSpan);
+                    tagsContainer.appendChild(document.createTextNode(' '));
                 });
+                lightboxPromptArea.appendChild(tagsContainer);
+                lightboxPromptArea.appendChild(createPromptBlock('Prompt', img.prompt, false));
             }
 
             if (lightboxArtistEl) lightboxArtistEl.textContent = img.artist;
             if (lightboxModelEl) lightboxModelEl.textContent = img.modelName;
-            if (lightboxPromptEl) lightboxPromptEl.textContent = img.prompt;
             if (lightboxSeedEl) lightboxSeedEl.textContent = img.seed;
-            
             updateFavoriteButtonUI(favorites.has(img.id.toString()));
 
             if (lightboxArtistEl) {
-                lightboxArtistEl.onclick = () => {
-                    if (img.artist) {
-                        navigator.clipboard.writeText(img.artist).then(() => showToast(`Copied artist: ${img.artist}`)).catch(err => console.error('Failed to copy artist:', err));
-                    }
-                };
+                lightboxArtistEl.onclick = () => { if (img.artist) { navigator.clipboard.writeText(img.artist).then(() => showToast(`Copied artist: ${img.artist}`)).catch(err => console.error('Failed to copy artist:', err)); } };
             }
             
             if (lightboxRelatedImagesContainer) {
                 lightboxRelatedImagesContainer.innerHTML = '';
-                const relatedImages = galleryData.sectionImages.filter(
-                    relImg => relImg.id !== img.id && relImg.artist === img.artist && relImg.model === img.model
-                ).slice(0, 20); 
-                
+                const relatedImages = galleryData.sectionImages.filter(relImg => relImg.id !== img.id && relImg.artist === img.artist && relImg.model === img.model).slice(0, 20); 
                 if (relatedImages.length > 0) {
                     const relatedTitle = document.createElement('h4');
                     relatedTitle.textContent = 'More from this artist & model:';
@@ -388,7 +368,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     lightboxRelatedImagesContainer.appendChild(relatedGrid);
                 }
             }
-            
             if (lightboxEl) lightboxEl.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
@@ -400,64 +379,30 @@ document.addEventListener('DOMContentLoaded', function() {
             document.body.style.overflow = '';
         }
         
-        if (favoriteButtonEl) { 
-            favoriteButtonEl.addEventListener('click', () => {
-                if (currentLightboxImage) {
-                    toggleFavorite(currentLightboxImage.id);
-                }
-            });
-        }
-        
-        if (copyPromptBtn && lightboxPromptEl) {
-            copyPromptBtn.addEventListener('click', () => {
-                navigator.clipboard.writeText(lightboxPromptEl.textContent).then(() => showToast("Prompt copied!")).catch(err => console.error('Failed to copy prompt:', err));
-            });
-        }
-
+        if (favoriteButtonEl) favoriteButtonEl.addEventListener('click', () => { if (currentLightboxImage) toggleFavorite(currentLightboxImage.id); });
         if (lightboxImgEl && fullscreenOverlay && fullscreenImg) {
-            lightboxImgEl.addEventListener('click', () => {
-                fullscreenImg.src = lightboxImgEl.src;
-                fullscreenOverlay.classList.add('visible');
-            });
+            lightboxImgEl.addEventListener('click', () => { fullscreenImg.src = lightboxImgEl.src; fullscreenOverlay.classList.add('visible'); });
         }
-        if (fullscreenOverlay) {
-            fullscreenOverlay.addEventListener('click', () => {
-                fullscreenOverlay.classList.remove('visible');
-                fullscreenImg.src = '';
-            });
-        }
-        
+        if (fullscreenOverlay) fullscreenOverlay.addEventListener('click', () => { fullscreenOverlay.classList.remove('visible'); fullscreenImg.src = ''; });
         if (closeBtn) closeBtn.addEventListener('click', closeLightbox);
-        if (lightboxEl) {
-            lightboxEl.addEventListener('click', (e) => { if (e.target === lightboxEl) closeLightbox(); });
-        }
+        if (lightboxEl) lightboxEl.addEventListener('click', (e) => { if (e.target === lightboxEl) closeLightbox(); });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && lightboxEl && lightboxEl.classList.contains('active')) closeLightbox(); });
-        
         window.addEventListener('scroll', () => {
             if (!loadingEl || loadingEl.style.display === 'none') return; 
-            if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 500) {
-                if (loadedImagesCount < shuffledImages.length) loadImages(12);
-            }
+            if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 500) { if (loadedImagesCount < shuffledImages.length) loadImages(12); }
         });
         
         filterGallery();
     }
 
-    // --- Main Initialization Sequence ---
     function mainInit() {
         if (typeof galleryData === 'undefined' || !galleryData.sectionImages) {
             console.error("galleryData is not defined. Cannot initialize gallery.");
             return;
         }
-
         const isNsfw = galleryData.isNsfwSection || false;
         const disclaimerAccepted = localStorage.getItem(AGE_DISCLAIMER_KEY) === 'true';
-
-        if (isNsfw && !disclaimerAccepted) {
-            showAgeDisclaimer();
-        } else {
-            initializeGallery();
-        }
+        if (isNsfw && !disclaimerAccepted) showAgeDisclaimer(); else initializeGallery();
     }
 
     mainInit();
