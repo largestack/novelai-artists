@@ -1,761 +1,648 @@
 #!/usr/bin/env python3
+"""
+NovelAI Gallery Site Generator
+Refactored for cleanliness, maintainability, and production-grade quality.
+"""
+
 import os
 import json
 import base64
 import random
 import shutil
 import requests
-from PIL import Image
-import io
 import argparse
 import time
 import zipfile
-from dotenv import load_dotenv
 import hashlib
-import glob
+from PIL import Image
+import io
+from dotenv import load_dotenv
+from typing import Dict, Any, List, Optional, Tuple
 
-# Configuration
+# --- Constants and Configuration ---
+
+# Core Paths
 OUTPUT_SITE_DIR = "./output_site"
-OUTPUT_IMAGES_DIR = "./output_images" # Base for _data.json files and SFW images
-NSFW_IMAGES_DIR_BASE = f"{OUTPUT_IMAGES_DIR}/nsfw_gallery" # Dedicated base for NSFW images
+OUTPUT_DATA_DIR = "./output_images"  # Centralized directory for JSON data files
+STATIC_ASSETS_DIR = "./static_assets"  # Source for CSS/JS
+
+# Input Files
 ARTISTS_FILE = "artists.txt"
-NSFW_PROMPTS_FILE = "nsfw.txt" # For NSFW prompts
-TEMPLATE_FILE = "template.prompt"
+PROMPT_TEMPLATE_FILE = "template.prompt"
+
+# API & Generation
 API_URL = "https://image.novelai.net"
-
-# Configuration for different gallery sections
-GALLERY_SECTIONS = [
-    {
-        "id": "women",
-        "name": "Women",
-        "file": "1girl.txt",
-        "max_images": 45000,
-        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Original path for SFW
-        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Original path for SFW
-        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw", # Original path for SFW
-        "is_nsfw": False
-    },
-    {
-        "id": "men",
-        "name": "Men",
-        "file": "1boy.txt",
-        "max_images": 5000,
-        "images_dir_full": f"{OUTPUT_IMAGES_DIR}/full", # Original path for SFW
-        "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/thumb", # Original path for SFW
-        "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/raw", # Original path for SFW
-        "is_nsfw": False
-    },
-    {
-        "id": "nsfw",
-        "name": "NSFW Zone", # Clearly named
-        "file": NSFW_PROMPTS_FILE, # Use the new constant
-        "max_images": 24000, # Example, adjust as needed
-        "images_dir_full": f"{NSFW_IMAGES_DIR_BASE}/full", # Dedicated path
-        "images_dir_thumb": f"{NSFW_IMAGES_DIR_BASE}/thumb", # Dedicated path
-        "images_dir_raw": f"{NSFW_IMAGES_DIR_BASE}/raw", # Dedicated path
-        "is_nsfw": True # Flag for special handling
-    }
-]
-
-# New configuration for the noncon section
-NONCON_SECTION_CONFIG = {
-    "id": "noncon",
-    "name": "Non-Con Gallery",
-    "file": "prompts_gemini.json",
-    "max_images": 24000,
-    "images_dir_full": f"{OUTPUT_IMAGES_DIR}/noncon/full",
-    "images_dir_thumb": f"{OUTPUT_IMAGES_DIR}/noncon/thumb",
-    "images_dir_raw": f"{OUTPUT_IMAGES_DIR}/noncon/raw",
-    "is_nsfw": True,
-}
-
-# CONFIG VARIABLES
-RANDOM_SEED = 42  # Fixed seed for deterministic image generation
-
-# Setup fixed random seed for deterministic generation
+NAI_CREDENTIALS_CACHE = ".nai_credentials.json"
+RANDOM_SEED = 42
 random.seed(RANDOM_SEED)
 
-# Define models to use
+# Site Structure Configuration
+# Defines all gallery sections, their properties, and generation types.
+# 'base_image_path_segment' is used to construct paths, ensuring backward compatibility.
+# 'type' determines which payload (v3 for single prompt, v4 for multi-character) is used.
+SITE_CONFIG = {
+    "women": {
+        "name": "Women",
+        "prompt_file": "1girl.txt",
+        "max_images": 45000,
+        "base_image_path_segment": "images",
+        "is_nsfw": False,
+        "type": "v3"
+    },
+    "men": {
+        "name": "Men",
+        "prompt_file": "1boy.txt",
+        "max_images": 5000,
+        "base_image_path_segment": "images",
+        "is_nsfw": False,
+        "type": "v3"
+    },
+    "nsfw": {
+        "name": "NSFW Zone",
+        "prompt_file": "nsfw.txt",
+        "max_images": 24000,
+        "base_image_path_segment": "images/nsfw_gallery",
+        "is_nsfw": True,
+        "type": "v3"
+    },
+    "noncon": {
+        "name": "Non-Con Gallery",
+        "prompt_file": "prompts_gemini.json",
+        "max_images": 24000,
+        "base_image_path_segment": "images/noncon",
+        "is_nsfw": True,
+        "type": "v4",
+        "hidden": True # This section will not appear in the navigation
+    }
+}
+
+# Models available for generation
 MODELS = [
     {"id": "nai-diffusion-4-full", "name": "NAI Diffusion 4 Full"},
     {"id": "nai-diffusion-4-curated-preview", "name": "NAI Diffusion 4 Curated"},
     {"id": "nai-diffusion-4-5-curated", "name": "NAI Diffusion 4.5 Curated"},
     {"id": "nai-diffusion-4-5-full", "name": "NAI Diffusion 4.5 Full"},
 ]
+# The model used for all new image generations
+NEW_GENERATION_MODEL_ID = "nai-diffusion-4-5-full"
 
 
-def setup_directories():
-    """Setup the output directory structure"""
-    os.makedirs(OUTPUT_SITE_DIR, exist_ok=True)
-    os.makedirs(OUTPUT_IMAGES_DIR, exist_ok=True) # For _data.json files and SFW image folders
+class ConfigManager:
+    """Handles loading and processing of all site configuration."""
 
-    all_sections = GALLERY_SECTIONS + [NONCON_SECTION_CONFIG]
-    for section in all_sections:
-        os.makedirs(section["images_dir_full"], exist_ok=True)
-        os.makedirs(section["images_dir_thumb"], exist_ok=True)
-        os.makedirs(section["images_dir_raw"], exist_ok=True)
+    def __init__(self, site_config: Dict[str, Any]):
+        self.config = site_config
+        self._build_dynamic_paths()
+
+    def _build_dynamic_paths(self):
+        """Builds full, thumb, and raw image paths for each section."""
+        for section_id, conf in self.config.items():
+            # MODIFICATION: Point to the image source directory based on section ID.
+            # This matches the user's structure: ./output_images/noncon/thumb/...
+            image_source_path = os.path.join(OUTPUT_DATA_DIR, section_id)
+            
+            # This 'paths' key is now for the SOURCE files for reading/writing.
+            conf["paths"] = {
+                "full": os.path.join(image_source_path, "full"),
+                "thumb": os.path.join(image_source_path, "thumb"),
+                "raw": os.path.join(image_source_path, "raw"),
+            }
+            conf["data_file"] = os.path.join(OUTPUT_DATA_DIR, f"{section_id}_data.json")
 
 
-    for folder in ["css", "js"]:
-        src_folder = f"./{folder}"
-        dest_folder = f"{OUTPUT_SITE_DIR}/{folder}"
-        if os.path.exists(src_folder):
-            if os.path.exists(dest_folder):
-                shutil.rmtree(dest_folder)
-            shutil.copytree(src_folder, dest_folder)
+    def get_section_config(self, section_id: str) -> Dict[str, Any]:
+        return self.config[section_id]
 
-def read_artists():
-    if not os.path.exists(ARTISTS_FILE):
-        print(f"Warning: {ARTISTS_FILE} not found. No artists will be used.")
-        return []
-    with open(ARTISTS_FILE, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
+    def get_all_sections(self) -> Dict[str, Any]:
+        return self.config
 
-def read_section_descriptions(file_path):
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
-    print(f"Warning: Description file {file_path} not found.")
-    return []
 
-def read_template():
-    if not os.path.exists(TEMPLATE_FILE):
-        raise FileNotFoundError(f"Error: {TEMPLATE_FILE} not found. This file is required.")
-    with open(TEMPLATE_FILE, "r", encoding="utf-8") as f:
-        return f.read()
+class NovelAI_API:
+    """A client to handle all communication with the NovelAI API."""
 
-def login(api_key=None):
-    credentials_file = ".nai_credentials.json"
-    load_dotenv()
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_url = API_URL
+        self.headers = self._login(api_key)
 
-    if api_key:
-        print("Using API key from command line arguments")
-        return {"Authorization": f"Bearer {api_key}"}
+    def _login(self, api_key: Optional[str]) -> Dict[str, str]:
+        """Authenticates with NovelAI, prioritizing sources: CLI arg -> .env -> cache -> interactive."""
+        load_dotenv()
+        # 1. Prioritize API key from command line
+        if api_key:
+            print("Using API key from command-line argument.")
+            return {"Authorization": f"Bearer {api_key}"}
 
-    env_token = os.getenv("NAI_PERSISTENT_TOKEN") or os.getenv("NAI_PERSISTENT_API_KEY")
-    if env_token:
-        print("Using persistent token from .env file")
-        return {"Authorization": f"Bearer {env_token}"}
+        # 2. Check for persistent token in .env file
+        env_token = os.getenv("NAI_PERSISTENT_TOKEN")
+        if env_token:
+            print("Using persistent token from .env file.")
+            return {"Authorization": f"Bearer {env_token}"}
 
-    if os.path.exists(credentials_file):
-        try:
-            with open(credentials_file, "r") as f:
-                cached = json.load(f)
-                print("Using cached credentials")
+        # 3. Try to use cached credentials
+        if os.path.exists(NAI_CREDENTIALS_CACHE):
+            try:
+                with open(NAI_CREDENTIALS_CACHE, "r") as f:
+                    cached = json.load(f)
+                print("Using cached access token.")
                 return {"Authorization": f"Bearer {cached['accessToken']}"}
-        except Exception as e:
-            print(f"Error loading cached credentials: {e}. Will prompt for login.")
-            if os.path.exists(credentials_file): os.remove(credentials_file)
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"Cached credentials file is invalid ({e}), deleting and re-authenticating.")
+                os.remove(NAI_CREDENTIALS_CACHE)
 
-    print("No API key, persistent token, or valid cached credentials found. Please provide login credentials.")
-    email = input("Enter NovelAI email (or API Key if you prefer to paste it here): ")
-
-    auth_url = f"{API_URL}/user"
-    auth_headers = {}
-    auth_payload = {}
-
-    if "@" not in email and len(email) > 60:
-        print("Attempting to use input as an API Key for persistent token...")
-        auth_url += "/create-persistent-token"
-        auth_headers = {"Authorization": f"Bearer {email}"}
-    else:
-        password = input("Enter NovelAI password: ")
-        auth_url += "/login"
-        auth_payload = {"email": email, "password": password}
-
-    try:
-        if auth_payload:
-             response = requests.post(auth_url, json=auth_payload)
-        else:
-             response = requests.post(auth_url, headers=auth_headers)
-        response.raise_for_status()
-        data = response.json()
-
-        with open(credentials_file, "w") as f:
-            json.dump({"accessToken": data['accessToken']}, f)
+        # 4. Fallback to interactive login
+        print("\nNo valid credentials found. Please provide login details.")
+        email = input("Enter NovelAI email (or paste an API Key): ")
+        auth_url = f"{self.api_url}/user"
+        auth_payload, auth_headers = {}, {}
 
         if "@" not in email and len(email) > 60:
-            print("\nSuccessfully authenticated using the provided API Key.")
-            print("A persistent session token has been cached for future use.")
-            print("You can also add this token to your .env file as NAI_PERSISTENT_TOKEN if desired.")
-            print(f"NAI_PERSISTENT_TOKEN={data['accessToken']}")
+            print("Input appears to be an API Key. Attempting to create a persistent token...")
+            auth_url += "/create-persistent-token"
+            auth_headers = {"Authorization": f"Bearer {email}"}
         else:
-            print("\nLogin successful. Session token cached.")
-            print("TIP: For long-term automated use, consider creating a persistent token via NovelAI's settings")
-            print("and storing it in a .env file as NAI_PERSISTENT_TOKEN=your_token")
+            password = input("Enter NovelAI password: ")
+            auth_url += "/login"
+            auth_payload = {"email": email, "password": password}
 
-        return {"Authorization": f"Bearer {data['accessToken']}"}
-    except requests.exceptions.HTTPError as e:
-        status_code = e.response.status_code
-        error_text = e.response.text
-        if status_code == 401:
-            print(f"Authentication failed: Invalid credentials or API key. ({status_code})")
+        try:
+            response = requests.post(auth_url, json=auth_payload, headers=auth_headers)
+            response.raise_for_status()
+            data = response.json()
+            access_token = data['accessToken']
+
+            with open(NAI_CREDENTIALS_CACHE, "w") as f:
+                json.dump({"accessToken": access_token}, f)
+
+            print("\nAuthentication successful. Token has been cached.")
+            return {"Authorization": f"Bearer {access_token}"}
+        except requests.exceptions.HTTPError as e:
+            msg = f"Authentication failed: {e.response.status_code} - {e.response.text}"
+            print(msg)
+            raise ConnectionError(msg) from e
+        except Exception as e:
+            msg = f"An unexpected error occurred during authentication: {e}"
+            print(msg)
+            raise ConnectionError(msg) from e
+
+    def generate(self, payload: Dict[str, Any]) -> Optional[bytes]:
+        """Sends a generation request to the API and extracts the image from the response."""
+        try:
+            response = requests.post(f"{self.api_url}/ai/generate-image", headers=self.headers, json=payload)
+            response.raise_for_status()
+            zip_bytes = io.BytesIO(response.content)
+            with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
+                image_filename = next((n for n in zip_ref.namelist() if n.endswith('.png')), None)
+                if not image_filename:
+                    raise IOError("No PNG image found in API response zip.")
+                return zip_ref.read(image_filename)
+        except requests.exceptions.RequestException as e:
+            print(f"API request error: {e}")
+            if e.response:
+                print(f"Response content: {e.response.text}")
+            return None
+        except Exception as e:
+            print(f"Error processing API response: {e}")
+            return None
+
+
+class SiteGenerator:
+    """Manages the creation of the static site, from image generation to HTML rendering."""
+
+    def __init__(self, config_manager: ConfigManager, api_client: Optional[NovelAI_API]):
+        self.config_manager = config_manager
+        self.api = api_client
+        self.artists = self._read_file_lines(ARTISTS_FILE)
+        try:
+            with open(PROMPT_TEMPLATE_FILE, "r", encoding="utf-8") as f:
+                self.prompt_template = f.read()
+        except FileNotFoundError:
+            print(f"Warning: {PROMPT_TEMPLATE_FILE} not found. V3 generation will fail.")
+            self.prompt_template = "{{prompt}}" # Fallback
+
+    @staticmethod
+    def _read_file_lines(filepath: str) -> List[str]:
+        """Reads non-empty lines from a text file."""
+        if not os.path.exists(filepath):
+            print(f"Warning: File not found: {filepath}")
+            return []
+        with open(filepath, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip()]
+            
+    def _read_section_prompts(self, prompt_file: str) -> List[Any]:
+        """Loads prompts from either a .txt or .json file."""
+        if not os.path.exists(prompt_file):
+            print(f"Warning: Prompt file not found: {prompt_file}")
+            return []
+        if prompt_file.endswith(".json"):
+            with open(prompt_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        else: # Assumes .txt
+            return self._read_file_lines(prompt_file)
+
+    @staticmethod
+    def _save_image_files(img_bytes: bytes, filename_stem: str, paths: Dict[str, str]) -> Dict[str, str]:
+        """Saves raw, full, and thumbnail versions of an image."""
+        img = Image.open(io.BytesIO(img_bytes))
+        
+        # Save raw PNG
+        raw_path = os.path.join(paths["raw"], f"{filename_stem}.png")
+        with open(raw_path, "wb") as f: f.write(img_bytes)
+
+        # Save full-size JPEG for display
+        full_path = os.path.join(paths["full"], f"{filename_stem}.jpg")
+        full_img = img.copy()
+        full_img.thumbnail((int(img.width * 0.7), int(img.height * 0.7)), Image.Resampling.LANCZOS)
+        full_img.convert("RGB").save(full_path, "JPEG", quality=80)
+        
+        # Save thumbnail JPEG
+        thumb_path = os.path.join(paths["thumb"], f"{filename_stem}.jpg")
+        thumb_img = img.copy()
+        thumb_img.thumbnail((int(img.width * 0.35), int(img.height * 0.35)), Image.Resampling.LANCZOS)
+        thumb_img.convert("RGB").save(thumb_path, "JPEG", quality=80)
+
+        return {"full": full_path, "thumb": thumb_path, "raw": raw_path}
+
+    def _create_v3_payload(self, prompt: str, artist: str, seed: int, is_nsfw: bool) -> Dict[str, Any]:
+        """Creates the API payload for standard single-prompt (V3-style) generation."""
+        full_prompt = self.prompt_template.replace("{{prompt}}", prompt).replace("{{artist}}", artist)
+        if is_nsfw:
+            full_prompt += ", nsfw, uncensored"
+        
+        base_prompt = f"{full_prompt}, no text, best quality, masterpiece, very aesthetic, absurdres"
+        negative_prompt = "blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, white blank page, blank page"
+        if is_nsfw:
+             negative_prompt += ", shota, child"
         else:
-            print(f"Authentication error: {status_code} - {error_text}")
-        raise Exception("Authentication failed.")
-    except Exception as e:
-        print(f"An error occurred during authentication: {e}")
-        raise Exception("Authentication failed.")
-
-def _save_image_files(img_bytes, filename_stem, images_dir_full, images_dir_thumb, images_dir_raw):
-    """Helper function to save raw, full, and thumb images from bytes."""
-    img = Image.open(io.BytesIO(img_bytes))
-
-    # Save raw PNG image
-    raw_png_filename = f"{filename_stem}.png"
-    actual_save_raw_path = os.path.join(images_dir_raw, raw_png_filename)
-    with open(actual_save_raw_path, "wb") as f:
-        f.write(img_bytes)
-
-    # Save full-size display JPEG
-    jpeg_filename = f"{filename_stem}.jpg"
-    actual_save_full_path = os.path.join(images_dir_full, jpeg_filename)
-    full_size = (int(img.width * 0.7), int(img.height * 0.7))
-    img_full = img.copy()
-    img_full.thumbnail(full_size, Image.Resampling.LANCZOS)
-    img_full.convert("RGB").save(actual_save_full_path, "JPEG", quality=80)
-
-    # Save thumbnail JPEG
-    actual_save_thumb_path = os.path.join(images_dir_thumb, jpeg_filename)
-    thumb_size = (int(img.width * 0.35), int(img.height * 0.35))
-    img_thumb = img.copy()
-    img_thumb.thumbnail(thumb_size, Image.Resampling.LANCZOS)
-    img_thumb.convert("RGB").save(actual_save_thumb_path, "JPEG", quality=80)
-
-    return {
-        "full_path_for_html": os.path.relpath(actual_save_full_path, OUTPUT_SITE_DIR).replace(os.sep, '/'),
-        "thumb_path_for_html": os.path.relpath(actual_save_thumb_path, OUTPUT_SITE_DIR).replace(os.sep, '/'),
-        "raw_path_for_html": os.path.relpath(actual_save_raw_path, OUTPUT_SITE_DIR).replace(os.sep, '/'),
-    }
-
-
-def generate_image(prompt, headers, filename_base, model_id,
-                   images_dir_full, images_dir_thumb, images_dir_raw, is_nsfw_section=False): # Added is_nsfw_section
-    seed = random.randint(1, 2147483647)
-    base_prompt = f"{prompt}, no text, best quality, masterpiece, very aesthetic, absurdres"
-    
-    if is_nsfw_section:
-        negative_prompt = "blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, white blank page, blank page, shota, child"
-    else:
-        negative_prompt = "nsfw, blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, white blank page, blank page"
-
-    payload = {
-        "input": base_prompt, "model": model_id, "action": "generate",
-        "parameters": {
-            "params_version": 3, "width": 832, "height": 1216, "scale": 6,
-            "sampler": "k_dpmpp_2m_sde", "steps": 28, "n_samples": 1, "ucPreset": 0,
-            "qualityToggle": True, "autoSmea": False, "dynamic_thresholding": False,
-            "controlnet_strength": 1, "legacy": False, "add_original_image": True,
-            "cfg_rescale": 0, "noise_schedule": "karras", "legacy_v3_extend": False,
-            "skip_cfg_above_sigma": None, "use_coords": False, "legacy_uc": False,
-            "normalize_reference_strength_multiple": True,
-            "v4_prompt": {"caption": {"base_caption": base_prompt, "char_captions": []}, "use_coords": False, "use_order": True},
-            "v4_negative_prompt": {"caption": {"base_caption": negative_prompt, "char_captions": []}, "legacy_uc": False},
-            "seed": seed, "characterPrompts": [], "reference_image_multiple": [],
-            "reference_strength_multiple": [], "negative_prompt": negative_prompt
-        }
-    }
-
-    print(f"Generating image for: {filename_base}_ (seed: {seed}) with model {model_id}")
-
-    try:
-        response = requests.post(f"{API_URL}/ai/generate-image", headers=headers, json=payload)
-        response.raise_for_status()
-
-        zip_bytes = io.BytesIO(response.content)
-        with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
-            if not zip_ref.namelist(): raise Exception("No files found in zip from API.")
-            image_file_name_in_zip = next((n for n in zip_ref.namelist() if n.startswith('image_') and n.endswith('.png')), zip_ref.namelist()[0])
-            image_bytes = zip_ref.read(image_file_name_in_zip)
-
-        filename_stem = f"{filename_base}_{seed}"
-        saved_paths = _save_image_files(image_bytes, filename_stem, images_dir_full, images_dir_thumb, images_dir_raw)
+             negative_prompt += ", nsfw"
 
         return {
-            "filename_base": filename_base,
-            "filename_stem": filename_stem,
-            "seed": seed,
-            "model_id": model_id,
-            "modelName": next((m["name"] for m in MODELS if m["id"] == model_id), model_id),
-            **saved_paths
+            "input": base_prompt, "model": NEW_GENERATION_MODEL_ID, "action": "generate",
+            "parameters": { "params_version": 3, "width": 832, "height": 1216, "scale": 6, "sampler": "k_dpmpp_2m_sde", "steps": 28, "n_samples": 1, "ucPreset": 0, "qualityToggle": True, "seed": seed, "negative_prompt": negative_prompt }
         }
-    except requests.exceptions.RequestException as e:
-        print(f"API request error for {filename_base}: {e}")
-        if hasattr(e, 'response') and e.response is not None: print(f"Response content: {e.response.text}")
-        return None
-    except Exception as e:
-        print(f"Error processing image for {filename_base}: {e}")
-        return None
 
-def generate_character_prompt(character_desc, artist_name, template):
-    filled_prompt = template.replace("{{prompt}}", character_desc)
-    filled_prompt = filled_prompt.replace("{{artist}}", artist_name )
-    return filled_prompt
+    def _create_v4_payload(self, prompt_obj: Dict[str, str], artist: str, seed: int) -> Dict[str, Any]:
+        """Creates the API payload for multi-character (V4-style) generation."""
+        artist = "{artist:" + artist + "}" 
+        base_prompt = f"{artist}, very aesthetic, masterpiece, absurdres, no text, {prompt_obj['prompt']}"
+        if "character1" not in prompt_obj or "character2" not in prompt_obj:
+            print("Warning: Missing character prompts in V4 payload. Skipping generation.")
+            return {}
+        char1_prompt = prompt_obj['character1']
+        char2_prompt = prompt_obj['character2']
+        negative_prompt = "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page"
 
-def generate_section_images(section_config, character_descriptions, artists, template, headers):
-    section_id = section_config["id"]
-    images_dir_full = section_config["images_dir_full"]
-    images_dir_thumb = section_config["images_dir_thumb"]
-    images_dir_raw = section_config["images_dir_raw"]
-    is_nsfw = section_config.get("is_nsfw", False) # Get NSFW flag
+        return {
+            "input": base_prompt, "model": NEW_GENERATION_MODEL_ID, "action": "generate",
+            "parameters": {
+                # --- Restored parameters from the old, working script ---
+                "params_version": 3, "width": 832, "height": 1216, "scale": 5, "sampler": "k_euler_ancestral",
+                "steps": 23, "n_samples": 1, "ucPreset": 0, "qualityToggle": True, "add_original_image": True,
+                "cfg_rescale": 0, "noise_schedule": "karras", "seed": seed,
+                
+                # --- Corrected v4_prompt and v4_negative_prompt structure ---
+                "v4_prompt": {
+                    "caption": {
+                        "base_caption": base_prompt, 
+                        "char_captions": [
+                            {"char_caption": char1_prompt, "centers": [{"x": 0.5, "y": 0.5}]}, 
+                            {"char_caption": char2_prompt, "centers": [{"x": 0.5, "y": 0.5}]}
+                        ]
+                    }, 
+                    "use_coords": False, 
+                    "use_order": True
+                },
+                "v4_negative_prompt": {
+                    "caption": {
+                        "base_caption": negative_prompt, 
+                        "char_captions": [
+                            {"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]}, 
+                            {"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]}
+                        ]
+                    }
+                },
 
-    max_images = section_config["max_images"]
-    section_data_file = f"{OUTPUT_IMAGES_DIR}/{section_id}_data.json"
+                # --- Added the CRITICAL missing characterPrompts key ---
+                "characterPrompts": [
+                    {"prompt": char1_prompt, "uc": "", "center": {"x": 0.5, "y": 0.5}, "enabled": True},
+                    {"prompt": char2_prompt, "uc": "", "center": {"x": 0.5, "y": 0.5}, "enabled": True}
+                ],
+                
+                "negative_prompt": negative_prompt
+            }
+        }
 
-    final_results_for_section = []
-    processed_filename_bases = set()
-    
-    items_in_json_file = 0
-    loaded_data_from_json = []
 
-    NEW_GENERATION_MODEL_ID = "nai-diffusion-4-5-full" 
+    def _load_existing_data(self, section_id: str, config: Dict[str, Any]) -> Tuple[List[Dict], set]:
+        """Loads and validates existing image data from the section's JSON file."""
+        data_file = config["data_file"]
+        if not os.path.exists(data_file):
+            return [], set()
 
-    if os.path.exists(section_data_file):
-        print(f"Loading existing data from {section_data_file} for section '{section_id}'")
-        with open(section_data_file, "r", encoding="utf-8") as f:
-            loaded_data_from_json = json.load(f)
-        items_in_json_file = len(loaded_data_from_json)
-
-        for item in loaded_data_from_json:
-            if 'filename_base' not in item or not item['filename_base']:
-                id_val = item.get('id', '')
-                full_val = item.get('full', '') 
-                potential_stem_from_id = id_val if '.' not in id_val and '_' in id_val else None
-                base_name_with_seed = potential_stem_from_id or (os.path.splitext(os.path.basename(full_val))[0] if full_val else "")
-                if base_name_with_seed:
-                    parts = base_name_with_seed.split('_')
-                    if len(parts) > 1 and parts[-1].isdigit(): 
-                        item['filename_base'] = '_'.join(parts[:-1])
-                    else: 
-                        item['filename_base'] = base_name_with_seed 
+        print(f"Loading existing data from {data_file} for section '{section_id}'")
+        with open(data_file, "r", encoding="utf-8") as f:
+            try:
+                loaded_data = json.load(f)
+            except json.JSONDecodeError:
+                print(f"Warning: Corrupt JSON file at {data_file}. Starting fresh.")
+                return [], set()
+        
+        valid_results, processed_ids = [], set()
+        paths = config["paths"]
+        
+        for item in loaded_data:
+            item_id = item.get("id")
+            if not item_id:
+                continue
             
-            filename_stem = item.get('id')
-            if not filename_stem:
-                print(f"  Skipping stale/invalid item due to missing 'id': {item}")
+            # Check if all required image files exist
+            if all(os.path.exists(os.path.join(p, f"{item_id}.{ext}")) for p, ext in [(paths["full"], "jpg"), (paths["thumb"], "jpg"), (paths["raw"], "png")]):
+                valid_results.append(item)
+                # Add a unique identifier for this generation to avoid duplicates
+                if config["type"] == "v4":
+                    processed_ids.add(item.get("prompt_hash"))
+                else: # v3
+                    processed_ids.add(item.get("filename_base"))
+            else:
+                 print(f"  Skipping stale/invalid item: {item_id} (missing files).")
+        
+        if len(loaded_data) != len(valid_results):
+            print(f"Filtered data: {len(valid_results)} of {len(loaded_data)} records were valid.")
+        
+        return valid_results, processed_ids
+
+    def process_section_images(self, section_id: str):
+        """The main orchestrator for generating images for a single section."""
+        if not self.api:
+            print("API client not available. Skipping image generation.")
+            return
+
+        config = self.config_manager.get_section_config(section_id)
+        print(f"\nProcessing section: {config['name']} ({config['type']} type)")
+
+        final_results, processed_ids = self._load_existing_data(section_id, config)
+        
+        num_to_generate = config["max_images"] - len(final_results)
+        if num_to_generate <= 0:
+            print(f"Section '{section_id}' is full ({len(final_results)}/{config['max_images']}). No new generation needed.")
+            return
+
+        prompts = self._read_section_prompts(config["prompt_file"])
+        if not prompts or not self.artists:
+            print("Cannot generate images: Missing prompts or artists.")
+            return
+
+        print(f"Attempting to generate {num_to_generate} new images...")
+        model_id_str = NEW_GENERATION_MODEL_ID.replace("nai-diffusion-", "").replace("-", "_")
+        
+        newly_added_count = 0
+        random.shuffle(prompts)
+
+        for prompt_data in prompts:
+            if newly_added_count >= num_to_generate: break
+
+            artist = random.choice(self.artists) # Simple random selection; can be balanced if needed
+            seed = random.randint(1, 2**31 - 1)
+            
+            if config["type"] == "v4":
+                prompt_hash = hashlib.md5(json.dumps(prompt_data, sort_keys=True).encode()).hexdigest()[:10]
+                if prompt_hash in processed_ids: continue
+                filename_base = f"{section_id}_{prompt_hash}_{model_id_str}"
+                payload = self._create_v4_payload(prompt_data, artist, seed)
+            else: # v3
+                prompt_plus_model = prompt_data + NEW_GENERATION_MODEL_ID
+                prompt_hash = hashlib.md5(prompt_plus_model.encode()).hexdigest()[:10]
+                filename_base = f"{section_id}_{prompt_hash}_{model_id_str}"
+                if filename_base in processed_ids: continue
+                payload = self._create_v3_payload(prompt_data, artist, seed, config["is_nsfw"])
+            
+            print(f"  Generating image for: {filename_base} (seed: {seed})")
+            image_bytes = self.api.generate(payload)
+
+            if not image_bytes:
+                print("  -> Generation failed. Skipping.")
+                time.sleep(1)
                 continue
 
-            if 'model' not in item: item['model'] = "unknown_model"
+            filename_stem = f"{filename_base}_{seed}"
+            self._save_image_files(image_bytes, filename_stem, config["paths"])
 
-            full_path_str = os.path.join(images_dir_full, f"{filename_stem}.jpg")
-            thumb_path_str = os.path.join(images_dir_thumb, f"{filename_stem}.jpg")
-            raw_path_str = os.path.join(images_dir_raw, f"{filename_stem}.png")
-            if not os.path.exists(raw_path_str): 
-                raw_path_str_jpg = os.path.join(images_dir_raw, f"{filename_stem}.jpg")
-                if os.path.exists(raw_path_str_jpg): raw_path_str = raw_path_str_jpg
+            model_name = next((m["name"] for m in MODELS if m["id"] == NEW_GENERATION_MODEL_ID), NEW_GENERATION_MODEL_ID)
+            
+            image_record = {
+                "id": filename_stem, "filename_base": filename_base, "artist": artist, 
+                "model": NEW_GENERATION_MODEL_ID, "modelName": model_name, "seed": seed,
+            }
+            if config["type"] == "v4":
+                image_record.update({
+                    "prompt": prompt_data.get('prompt', ''),
+                    "character1": prompt_data.get('character1', ''),
+                    "character2": prompt_data.get('character2', ''),
+                    "prompt_hash": prompt_hash
+                })
+            else: # v3
+                image_record["prompt"] = payload["input"]
 
-            if os.path.exists(full_path_str) and os.path.exists(thumb_path_str) and os.path.exists(raw_path_str) and item.get('filename_base'): 
-                if len(final_results_for_section) < max_images:
-                    final_results_for_section.append(item)
-                    processed_filename_bases.add(item['filename_base'])
-                else: break
-            else:
-                print(f"  Skipping stale/invalid item: {filename_stem}.")
+            final_results.append(image_record)
+            processed_ids.add(prompt_hash if config["type"] == "v4" else filename_base)
+            newly_added_count += 1
+
+            # Save progress incrementally
+            with open(config["data_file"], "w", encoding="utf-8") as f:
+                json.dump(final_results, f, indent=2)
+            time.sleep(0.2)
         
-        if items_in_json_file > 0 and len(final_results_for_section) < items_in_json_file:
-             print(f"Note: From {items_in_json_file} items in JSON, {len(final_results_for_section)} were valid and loaded.")
-        print(f"Loaded {len(final_results_for_section)} valid existing images from JSON for section '{section_id}'.")
+        print(f"Section '{section_id}' generation complete. Added {newly_added_count} new images.")
 
-        if len(final_results_for_section) >= max_images:
-             print(f"Max images ({max_images}) for section '{section_id}' reached from JSON data. No new generation needed.")
+    def generate_all_html(self):
+        """Generates all HTML files for the website."""
+        print("\n--- Generating HTML Pages ---")
+        all_sections = self.config_manager.get_all_sections()
 
-    data_changed_during_load_filter = items_in_json_file != len(final_results_for_section)
+        for section_id, config in all_sections.items():
+            self.generate_section_html(section_id, config, all_sections)
+            if config["is_nsfw"]:
+                self.generate_nsfw_landing_page(section_id, config)
 
-    model_artist_counts = {(model["id"], artist): 0 for model in MODELS for artist in artists}
-    for item in final_results_for_section:
-        model_id = item.get("model"); artist = item.get("artist")
-        if any(m["id"] == model_id for m in MODELS) and artist in artists:
-            if (model_id, artist) in model_artist_counts: model_artist_counts[(model_id, artist)] += 1
-        elif model_id and artist : print(f"  Note: Existing item for model '{model_id}' and artist '{artist}' found, but this combination is not in current active generation sets. It will be kept.")
+        self.generate_index_redirect(all_sections)
+        print("\n--- Finalizing Site ---")
+        print(f"Website generation complete. Files are in: {os.path.abspath(OUTPUT_SITE_DIR)}")
 
-    if not artists or not character_descriptions:
-        print(f"Skipping further image processing for section '{section_id}': No artists or descriptions.")
-        if data_changed_during_load_filter:
-            with open(section_data_file, "w", encoding="utf-8") as f: json.dump(final_results_for_section, f, indent=2)
-            print(f"Saved updated data (due to filtering) to {section_data_file} for section '{section_id}'.")
-        return final_results_for_section
+    def generate_section_html(self, section_id: str, config: Dict[str, Any], all_sections_for_nav: Dict[str, Any]):
+        """Generates the main gallery page for a single section."""
+        if not os.path.exists(config["data_file"]):
+            print(f"No data file for '{section_id}'. Skipping HTML generation.")
+            return
+
+        with open(config["data_file"], "r", encoding="utf-8") as f:
+            images_data = json.load(f)
+
+        if not images_data:
+            print(f"Data file for '{section_id}' is empty. Skipping HTML.")
+            return
+
+        title = f"NovelAI Gallery | {config['name']}"
+        html_filename = os.path.join(OUTPUT_SITE_DIR, f"{section_id}.html")
+        template_text = self.prompt_template if config["type"] == "v3" else "Prompts for this section are generated via LLM from a structured specification."
+
+        # Prepare image data for JavaScript, including the bug fix for noncon
+        images_data_for_js = []
+        for img in images_data:
+            js_img = {
+                "id": img.get("id"),
+                "artist": img.get("artist"),
+                "model": img.get("model"),
+                "modelName": img.get("modelName"),
+                "prompt": img.get("prompt"),
+                "seed": img.get("seed"),
+            }
+            # BUG FIX: Ensure character prompts are included for V4 sections
+            if 'character1' in img: js_img['character1'] = img['character1']
+            if 'character2' in img: js_img['character2'] = img['character2']
+            images_data_for_js.append(js_img)
         
-    num_slots_to_fill = max_images - len(final_results_for_section)
-    if num_slots_to_fill <= 0:
-        print(f"Section '{section_id}' is already full ({len(final_results_for_section)}/{max_images} images). No new images will be generated.")
-        if data_changed_during_load_filter:
-            with open(section_data_file, "w", encoding="utf-8") as f: json.dump(final_results_for_section, f, indent=2)
-            print(f"Saved updated data (due to filtering) to {section_data_file} for section '{section_id}'.")
-        return final_results_for_section
+        # Navigation links
+        nav_links_html = ""
+        for s_id, s_conf in all_sections_for_nav.items():
+            # MODIFICATION: Skip hidden sections in the navigation
+            if s_conf.get("hidden"):
+                continue
+            is_active = 'class="active"' if s_id == section_id else ''
+            # MODIFICATION: Use s_id instead of s_conf["id"]
+            link_href = f'{s_id}_landing.html' if s_conf.get("is_nsfw") else f'{s_id}.html'
+            nav_links_html += f'\n<li {is_active}><a href="{link_href}">{s_conf["name"]}</a></li>'
 
-    available_descriptions = character_descriptions.copy()
-    random.shuffle(available_descriptions)
-    newly_added_images_count = 0
-
-    print(f"Attempting to generate up to {num_slots_to_fill} new {section_id} images, using model '{NEW_GENERATION_MODEL_ID}' and balancing artists.")
-
-    for char_desc in available_descriptions:
-        if newly_added_images_count >= num_slots_to_fill: break
-
-        counts_for_new_gen_model_artist = {artist_name: model_artist_counts.get((NEW_GENERATION_MODEL_ID, artist_name), 0) for artist_name in artists}
-        min_artist_count = min(counts_for_new_gen_model_artist.values())
-        eligible_artists = [artist_name for artist_name, count in counts_for_new_gen_model_artist.items() if count == min_artist_count]
-        selected_artist = random.choice(eligible_artists)
-        
-        prompt_text = generate_character_prompt(char_desc, selected_artist, template).strip()
-        if is_nsfw: prompt_text = f"{prompt_text}, nsfw, uncensored"
-        prompt_plus_model_str = prompt_text + NEW_GENERATION_MODEL_ID 
-        prompt_hash = hashlib.md5(prompt_plus_model_str.encode("utf-8")).hexdigest()[:10]
-
-        model_identifier_for_filename = NEW_GENERATION_MODEL_ID.replace("nai-diffusion-", "").replace("-", "_")
-        filename_base = f"{section_id}_{prompt_hash}_{model_identifier_for_filename}"
-
-        if filename_base in processed_filename_bases: continue
-        
-        if headers is None: 
-            print("  Skipping API call because headers are not available (e.g. --no-generate or login failed).")
-            continue
-
-        print(f"  Generating image for: {char_desc[:60]}... (Artist: {selected_artist}, Model: {NEW_GENERATION_MODEL_ID}, NSFW: {is_nsfw})")
-        image_details = generate_image(prompt_text, headers, filename_base, NEW_GENERATION_MODEL_ID, images_dir_full, images_dir_thumb, images_dir_raw, is_nsfw_section=is_nsfw)
-
-        if not image_details:
-            time.sleep(1); continue
-
-        image_data_to_store = {
-            "id": image_details["filename_stem"], "filename_base": image_details["filename_base"], 
-            "artist": selected_artist, "prompt": prompt_text, "model": image_details["model_id"], 
-            "seed": image_details["seed"], "modelName": image_details["modelName"]
-        }
-        final_results_for_section.append(image_data_to_store)
-        processed_filename_bases.add(filename_base) 
-
-        model_artist_counts[(NEW_GENERATION_MODEL_ID, selected_artist)] = model_artist_counts.get((NEW_GENERATION_MODEL_ID, selected_artist), 0) + 1
-        newly_added_images_count += 1
-
-        with open(section_data_file, "w", encoding="utf-8") as f: json.dump(final_results_for_section, f, indent=2)
-        time.sleep(0.1) 
-
-    with open(section_data_file, "w", encoding="utf-8") as f: json.dump(final_results_for_section, f, indent=2)
-    print(f"Section '{section_id}': Added {newly_added_images_count} new images. Total: {len(final_results_for_section)}.")
-    return final_results_for_section
-
-
-def generate_redirect_html(output_path, target_url):
-    html_content = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Redirecting...</title><meta http-equiv="refresh" content="0;url={target_url}"><link rel="canonical" href="{target_url}" /><script type="text/javascript">window.location.href = "{target_url}";</script></head><body><p>If you are not redirected, <a href="{target_url}">click here</a>.</p></body></html>"""
-    with open(output_path, "w", encoding="utf-8") as f: f.write(html_content)
-    print(f"Generated redirect page: {output_path} -> {target_url}")
-
-def generate_section_html(section_config, images_data, template_text, all_gallery_sections_for_nav):
-    section_id = section_config["id"]
-    section_name = section_config["name"]
-    is_nsfw_page = section_config.get("is_nsfw", False)
-    title = f"NovelAI Gallery | {section_name}"
-    html_filename = f"{OUTPUT_SITE_DIR}/{section_id}.html"
-
-    safe_template_for_js = json.dumps(template_text)
-    
-    images_data_for_js = []
-    for img in images_data:
-        model_name = img.get("modelName", img.get("model", "unknown_model"))
-        if not model_name and "model" in img: model_name = next((m["name"] for m in MODELS if m["id"] == img["model"]), img["model"])
-
-        img_data_js = {
-            "id": img["id"], "artist": img.get("artist", "N/A"), "model": img.get("model", "unknown_model"),
-            "modelName": model_name, "prompt": img.get("prompt", ""), "seed": img.get("seed", ""),
-        }
-        # Add character prompts if they exist (for noncon section) - FIXED CONDITION
-        if img.get('character1'):
-            img_data_js['character1'] = img.get('character1')
-        if img.get('character2'):
-            img_data_js['character2'] = img.get('character2')
-        images_data_for_js.append(img_data_js)
-    
-    serialized_images_data = json.dumps(images_data_for_js)
-
-    nav_links_html = ""
-    # Use all_gallery_sections_for_nav to build nav links.
-    # noncon page will have nav links to other pages, but other pages won't link to it.
-    for s_nav in all_gallery_sections_for_nav:
-        is_active = 'class="active"' if s_nav["id"] == section_id else ''
-        link_href = f'{s_nav["id"]}.html'
-        if s_nav.get("is_nsfw", False): link_href = f'{s_nav["id"]}_landing.html'
-        nav_links_html += f'\n                    <li {is_active}><a href="{link_href}">{s_nav["name"]}</a></li>'
-    
-    if not all_gallery_sections_for_nav: # Case for noncon page if we want no nav
-         nav_links_html = f'<li><a href="index.html">Back to Main Site</a></li>'
-
-    age_disclaimer_display_style = "display: none;"
-    js_data_assignment = f"""const galleryData = {{
-            "sectionImages": {serialized_images_data},
-            "template": {safe_template_for_js},
+        js_data_assignment = f"""const galleryData = {{
+            "sectionImages": {json.dumps(images_data_for_js, indent=2)},
+            "template": {json.dumps(template_text)},
             "section": "{section_id}",
-            "isNsfwSection": {json.dumps(is_nsfw_page)}
+            "isNsfwSection": {json.dumps(config["is_nsfw"])},
+            "imagePaths": {{
+                "full": "{config['base_image_path_segment']}/full/",
+                "thumb": "{config['base_image_path_segment']}/thumb/"
+            }}
         }};"""
 
-    html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{title}</title><link rel="stylesheet" href="css/style.css">
-</head>
+        html_content = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>{title}</title><link rel="stylesheet" href="css/style.css"></head>
 <body>
-    <div id="age-disclaimer-overlay" style="{age_disclaimer_display_style}"><div id="age-disclaimer-modal"><h2>Age Verification</h2><p>You must be 18 years or older to view this content. {'The images in this section may be explicit and are intended for mature audiences only.' if is_nsfw_page else 'The images are intended to be SFW, but occasional errors sometimes result in nudity.'}</p><p>Please confirm your age to continue.</p><button id="age-confirm-button">I am 18 or older</button><button id="age-exit-button">Exit</button></div></div>
-    <header>
-        <div class="logo-container"><svg class="logo" viewBox="0 0 100 100" width="40" height="40"><circle cx="50" cy="50" r="40" fill="#6c5ce7" /><path d="M30,30 L70,70 M30,70 L70,30" stroke="white" stroke-width="8" stroke-linecap="round" /></svg><h1>{title}</h1></div>
-        <div class="site-navigation"><nav><ul>{nav_links_html}</ul></nav></div>
-        <div class="controls"><input type="search" id="search-box" placeholder="Search tags or artists..."><button id="favorites-toggle" class="action-button">Show Favorites</button><button id="theme-toggle" class="theme-button" title="Toggle Dark/Light Mode"></button></div>
-    </header>
+    <div id="age-disclaimer-overlay" style="display: none;"><div id="age-disclaimer-modal"><h2>Age Verification</h2><p>You must be 18 years or older to view this content.</p><p>Please confirm your age to continue.</p><button id="age-confirm-button">I am 18 or older</button><button id="age-exit-button">Exit</button></div></div>
+    <header><div class="logo-container"><h1>{title}</h1></div><div class="site-navigation"><nav><ul>{nav_links_html}</ul></nav></div><div class="controls"><input type="search" id="search-box" placeholder="Search..."><button id="favorites-toggle" class="action-button">Show Favorites</button><button id="theme-toggle" class="theme-button" title="Toggle Dark/Light Mode"></button></div></header>
     <div class="template-info"><h2>Base Prompt Template</h2><pre id="template-text"></pre></div>
     <div id="model-selector" class="model-selector"></div><div id="gallery" class="image-grid"></div>
-    <div id="lightbox" class="lightbox"><span class="close">&times;</span><div class="lightbox-content"><img id="lightbox-img" src="" alt="Enlarged image"><div class="lightbox-info"><div class="artist-container"><span>Artist: </span><span id="lightbox-artist" title="Click to copy artist" style="cursor:pointer;"></span></div><div id="favorite-container" class="favorite-container"><button id="favorite-button" class="favorite-button"><span id="favorite-icon" class="favorite-icon-gfx"></span><span id="favorite-text">Add to Favorites</span></button></div><div id="lightbox-related-images" class="related-images"></div><div id="lightbox-prompt-area" class="prompt-area"></div><div class="model-container"><span>Model: </span><span id="lightbox-model"></span></div><div class="seed-container"><span>Seed: </span><span id="lightbox-seed"></span></div></div></div></div>
+    <div id="lightbox" class="lightbox"><span class="close">&times;</span><div class="lightbox-content"><img id="lightbox-img" src="" alt="Enlarged image"><div class="lightbox-info"><div class="artist-container"><span>Artist: </span><span id="lightbox-artist" title="Click to copy artist"></span></div><div id="favorite-container" class="favorite-container"><button id="favorite-button" class="favorite-button"><span id="favorite-icon" class="favorite-icon-gfx"></span><span id="favorite-text">Add to Favorites</span></button></div><div id="lightbox-related-images" class="related-images"></div><div id="lightbox-prompt-area" class="prompt-area"></div><div class="model-container"><span>Model: </span><span id="lightbox-model"></span></div><div class="seed-container"><span>Seed: </span><span id="lightbox-seed"></span></div></div></div></div>
     <div id="fullscreen-overlay" class="fullscreen-overlay"><img id="fullscreen-img" src="" alt="Fullscreen image"></div><div id="loading" class="loading">Loading more images...</div>
     <script>{js_data_assignment}</script><script src="js/character_gallery.js"></script>
 </body></html>"""
 
-    with open(html_filename, "w", encoding="utf-8") as f: f.write(html_content)
-    print(f"Generated section page: {html_filename}")
+        with open(html_filename, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        print(f"Generated section page: {html_filename}")
 
-def generate_nsfw_landing_page(output_site_dir, nsfw_section_id, nsfw_section_name):
-    nsfw_gallery_url = f"{nsfw_section_id}.html"
-    landing_page_filename = f"{output_site_dir}/{nsfw_section_id}_landing.html"
-    html_content = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Warning: {nsfw_section_name} Content</title><link rel="stylesheet" href="css/style.css"><style>body{{display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:100vh;text-align:center;background-color:#1a1a2e;color:#e0e0e0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;padding:1rem}}.disclaimer-box{{background-color:#24243e;padding:2rem 3rem;border-radius:10px;box-shadow:0 10px 25px rgba(0,0,0,0.5);max-width:650px;border:1px solid #4a4a70}}.disclaimer-box h1{{color:#ff4757;margin-bottom:1.5rem;font-size:2rem;text-transform:uppercase;letter-spacing:1px}}.disclaimer-box p{{margin-bottom:1.5rem;line-height:1.7;font-size:1.05rem}}.disclaimer-box strong{{color:#ffa502}}.disclaimer-box .actions a{{display:inline-block;background-color:#2ecc71;color:white;padding:.9rem 1.8rem;text-decoration:none;border-radius:5px;margin:.5rem;transition:background-color .2s ease-in-out,transform .2s ease;font-weight:700;text-transform:uppercase;letter-spacing:.5px}}.disclaimer-box .actions a:hover{{background-color:#27ae60;transform:translateY(-2px)}}.disclaimer-box .actions a.exit{{background-color:#7f8c8d}}.disclaimer-box .actions a.exit:hover{{background-color:#6c7a7b}}.warning-icon{{font-size:2.5rem;margin-bottom:1rem;color:#ff4757}}</style></head><body><div class="disclaimer-box"><div class="warning-icon"><span role="img" aria-label="warning">🔞</span></div><h1>Adult Content Warning</h1><p>The section "<strong>{nsfw_section_name}</strong>" you are about to enter contains material that is sexually explicit and intended for adult audiences only. This content may be considered Not Safe For Work (NSFW).</p><p>You must be <strong>18 years of age or older</strong> (or the legal age of majority in your jurisdiction) to access this content. If you are not of legal age, or if such material offends you or is illegal to view in your location, please do not proceed.</p><p>By clicking "<strong>Enter Site (I Confirm I Am 18+)</strong>", you affirm that you meet these age requirements, that you understand the nature of the content, and that you are choosing to view it voluntarily.</p><div class="actions"><a href="{nsfw_gallery_url}">Enter Site (I Confirm I Am 18+)</a><a href="index.html" class="exit">Exit to Main Page</a></div></div></body></html>"""
-    with open(landing_page_filename, "w", encoding="utf-8") as f: f.write(html_content)
-    print(f"Generated NSFW landing page: {landing_page_filename} for section '{nsfw_section_name}'")
+    def generate_nsfw_landing_page(self, section_id: str, config: Dict[str, Any]):
+        """Generates a warning/landing page for an NSFW section."""
+        landing_page_filename = os.path.join(OUTPUT_SITE_DIR, f"{section_id}_landing.html")
+        html_content = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Warning: {config['name']} Content</title><link rel="stylesheet" href="css/style.css"><style>body{{display:flex;justify-content:center;align-items:center;min-height:100vh;text-align:center;padding:1rem}}.disclaimer-box{{background-color:var(--card-background);color:var(--text-color);padding:2rem 3rem;border-radius:10px;box-shadow:var(--card-shadow);max-width:650px;border:1px solid #4a4a70}}.disclaimer-box h1{{color:#ff4757;margin-bottom:1.5rem}}.disclaimer-box p{{margin-bottom:1.5rem;line-height:1.7}}.actions a{{display:inline-block;background-color:#2ecc71;color:white;padding:.9rem 1.8rem;text-decoration:none;border-radius:5px;margin:.5rem;transition:background-color .2s ease-in-out,transform .2s ease;font-weight:700}}.actions a:hover{{background-color:#27ae60}}.actions a.exit{{background-color:#7f8c8d}}.actions a.exit:hover{{background-color:#6c7a7b}}</style></head><body><div class="disclaimer-box"><h1>🔞 Adult Content Warning</h1><p>The section "<strong>{config['name']}</strong>" contains material that may be sexually explicit. You must be <strong>18 years of age or older</strong> to proceed.</p><div class="actions"><a href="{section_id}.html">Enter (I am 18+)</a><a href="index.html" class="exit">Exit</a></div></div></body></html>"""
+        with open(landing_page_filename, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        print(f"Generated NSFW landing page: {landing_page_filename}")
 
-# --- NEW FUNCTIONS FOR NONCON GENERATION ---
+    def generate_index_redirect(self, all_sections: Dict[str, Any]):
+        """Generates an index.html that redirects to the first available gallery page."""
+        # MODIFICATION: Find the first non-hidden section to redirect to.
+        first_sfw = next((s_id for s_id, s_conf in all_sections.items() if not s_conf.get("is_nsfw") and not s_conf.get("hidden")), None)
+        first_nsfw = next((s_id for s_id, s_conf in all_sections.items() if s_conf.get("is_nsfw") and not s_conf.get("hidden")), None)
+        
+        target_url = None
+        if first_sfw:
+            target_url = f"{first_sfw}.html"
+        elif first_nsfw:
+            target_url = f"{first_nsfw}_landing.html"
+            
+        if target_url:
+            html_content = f'<!DOCTYPE html><html><head><title>Redirecting...</title><meta http-equiv="refresh" content="0;url={target_url}"></head><body><p>Redirecting to <a href="{target_url}">{target_url}</a>...</p></body></html>'
+            with open(os.path.join(OUTPUT_SITE_DIR, "index.html"), "w", encoding="utf-8") as f:
+                f.write(html_content)
+            print(f"Generated index.html redirect to {target_url}")
 
-def generate_image_v4(prompt_obj, artist, headers, filename_base, model_id, dirs):
-    """Generates an image using the V4 payload structure for two characters."""
-    seed = random.randint(1, 2147483647)
+
+def setup_directories(config_manager: ConfigManager):
+    """Creates the necessary directory structure for the site and assets."""
+    print("--- Setting up directories ---")
+    os.makedirs(OUTPUT_SITE_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DATA_DIR, exist_ok=True)
     
-    # Prepend artist and keywords to the base prompt from the JSON file
-    base_prompt = f"by {artist}, very aesthetic, masterpiece, absurdres, no text, {prompt_obj['prompt']}"
-    char1_prompt = prompt_obj['character1']
-    char2_prompt = prompt_obj['character2']
-    
-    negative_prompt = "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page"
+    for section_conf in config_manager.get_all_sections().values():
+        for path in section_conf["paths"].values():
+            os.makedirs(path, exist_ok=True)
 
-    payload = {
-        "input": base_prompt, "model": model_id, "action": "generate",
-        "parameters": {
-            "params_version": 3, "width": 832, "height": 1216, "scale": 5, "sampler": "k_euler_ancestral",
-            "steps": 23, "n_samples": 1, "ucPreset": 0, "qualityToggle": True, "autoSmea": False,
-            "dynamic_thresholding": False, "controlnet_strength": 1, "legacy": False, "add_original_image": True,
-            "cfg_rescale": 0, "noise_schedule": "karras", "legacy_v3_extend": False, "skip_cfg_above_sigma": None,
-            "use_coords": False, "normalize_reference_strength_multiple": True, "inpaintImg2ImgStrength": 1,
-            "v4_prompt": {"caption": {"base_caption": base_prompt, "char_captions": [{"char_caption": char1_prompt, "centers": [{"x": 0.5, "y": 0.5}]}, {"char_caption": char2_prompt, "centers": [{"x": 0.5, "y": 0.5}]}]}, "use_coords": False, "use_order": True},
-            "v4_negative_prompt": {"caption": {"base_caption": negative_prompt, "char_captions": [{"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]}, {"char_caption": "", "centers": [{"x": 0.5, "y": 0.5}]}]}, "legacy_uc": False},
-            "legacy_uc": False, "seed": seed,
-            "characterPrompts": [
-                {"prompt": char1_prompt, "uc": "", "center": {"x": 0.5, "y": 0.5}, "enabled": True},
-                {"prompt": char2_prompt, "uc": "", "center": {"x": 0.5, "y": 0.5}, "enabled": True}
-            ],
-            "negative_prompt": negative_prompt, "deliberate_euler_ancestral_bug": False, "prefer_brownian": True
-        }
-    }
-    print(f"Generating V4 image for: {filename_base}_ (seed: {seed}) with model {model_id}")
-    try:
-        response = requests.post(f"{API_URL}/ai/generate-image", headers=headers, json=payload)
-        response.raise_for_status()
-        zip_bytes = io.BytesIO(response.content)
-        with zipfile.ZipFile(zip_bytes, 'r') as zip_ref:
-            if not zip_ref.namelist(): raise Exception("No files found in zip from API.")
-            image_file_name_in_zip = next((n for n in zip_ref.namelist() if n.startswith('image_') and n.endswith('.png')), zip_ref.namelist()[0])
-            image_bytes = zip_ref.read(image_file_name_in_zip)
-        filename_stem = f"{filename_base}_{seed}"
-        saved_paths = _save_image_files(image_bytes, filename_stem, dirs["full"], dirs["thumb"], dirs["raw"])
-        return {"filename_base": filename_base, "filename_stem": filename_stem, "seed": seed, "model_id": model_id, "modelName": next((m["name"] for m in MODELS if m["id"] == model_id), model_id), **saved_paths}
-    except requests.exceptions.RequestException as e:
-        print(f"API request error for {filename_base}: {e}")
-        if hasattr(e, 'response') and e.response is not None: print(f"Response content: {e.response.text}")
-        return None
-    except Exception as e:
-        print(f"Error processing image for {filename_base}: {e}")
-        return None
+    # Copy static assets (CSS, JS)
+    for asset_type in ["css", "js"]:
+        src_dir = os.path.join(STATIC_ASSETS_DIR, asset_type)
+        dest_dir = os.path.join(OUTPUT_SITE_DIR, asset_type)
+        if os.path.exists(src_dir):
+            shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+            print(f"Copied {src_dir} to {dest_dir}")
 
-def generate_noncon_images(headers, artists, prompts):
-    """Main loop to generate images for the noncon section."""
-    section_config = NONCON_SECTION_CONFIG
-    section_id = section_config["id"]
-    max_images = section_config["max_images"]
-    section_data_file = f"{OUTPUT_IMAGES_DIR}/{section_id}_data.json"
-
-    final_results = []
-    processed_hashes = set()
-    if os.path.exists(section_data_file):
-        with open(section_data_file, 'r', encoding='utf-8') as f: final_results = json.load(f)
-        for item in final_results: processed_hashes.add(item.get('prompt_hash'))
-        print(f"Loaded {len(final_results)} existing image records from {section_data_file}.")
-
-    num_to_generate = max_images - len(final_results)
-    if num_to_generate <= 0:
-        print(f"Section '{section_id}' is already full. No new generation needed.")
-        return final_results
-
-    print(f"Attempting to generate {num_to_generate} new images for section '{section_id}'.")
-    NEW_GENERATION_MODEL_ID = "nai-diffusion-4-5-full"
-    available_prompts = [p for p in prompts if hashlib.md5(json.dumps(p, sort_keys=True).encode()).hexdigest()[:10] not in processed_hashes]
-    random.shuffle(available_prompts)
-    dirs = {"full": section_config["images_dir_full"], "thumb": section_config["images_dir_thumb"], "raw": section_config["images_dir_raw"]}
-
-    newly_added_count = 0
-    for prompt_obj in available_prompts:
-        if newly_added_count >= num_to_generate: break
-        
-        artist = random.choice(artists)
-        prompt_hash = hashlib.md5(json.dumps(prompt_obj, sort_keys=True).encode()).hexdigest()[:10]
-        if prompt_hash in processed_hashes: continue
-
-        model_id_str = NEW_GENERATION_MODEL_ID.replace("nai-diffusion-", "").replace("-", "_")
-        filename_base = f"{section_id}_{prompt_hash}_{model_id_str}"
-        
-        image_details = generate_image_v4(prompt_obj, artist, headers, filename_base, NEW_GENERATION_MODEL_ID, dirs)
-        if image_details:
-            image_data = {
-                "id": image_details["filename_stem"], "filename_base": image_details["filename_base"],
-                "artist": artist, "prompt": prompt_obj.get('prompt', ''),
-                "character1": prompt_obj.get('character1', ''), "character2": prompt_obj.get('character2', ''),
-                "model": image_details["model_id"], "modelName": image_details["modelName"],
-                "seed": image_details["seed"], "prompt_hash": prompt_hash,
-            }
-            final_results.append(image_data)
-            processed_hashes.add(prompt_hash)
-            newly_added_count += 1
-            with open(section_data_file, "w", encoding="utf-8") as f: json.dump(final_results, f, indent=2)
-            time.sleep(0.5)
-
-    print(f"Finished noncon generation. Added {newly_added_count} new images. Total: {len(final_results)}.")
-    return final_results
-
-def process_noncon_section(api_key, no_generate=False):
-    """Handles the workflow for the noncon section."""
-    headers = None
-    if not no_generate:
-        try:
-            headers = login(api_key)
-        except Exception as e:
-            print(f"Login failed: {e}. Cannot generate images for noncon section.")
-            no_generate = True
-
-    if not no_generate:
-        artists = read_artists()
-        if not artists:
-            print("Error: artists.txt is missing or empty. Cannot generate images.")
-            return
-
-        prompt_file_path = NONCON_SECTION_CONFIG['file']
-        if not os.path.exists(prompt_file_path):
-            print(f"Error: Prompt file '{prompt_file_path}' not found.")
-            return
-        with open(prompt_file_path, 'r', encoding='utf-8') as f: prompts = json.load(f)
-        print(f"Loaded {len(prompts)} prompts from {prompt_file_path}.")
-        
-        generate_noncon_images(headers, artists, prompts)
-
-    # Always attempt to build HTML if the data file exists
-    print("\n--- Generating HTML Page for Noncon Section ---")
-    section_data_file = f"{OUTPUT_IMAGES_DIR}/{NONCON_SECTION_CONFIG['id']}_data.json"
-    if os.path.exists(section_data_file):
-        with open(section_data_file, "r", encoding="utf-8") as f: all_data = json.load(f)
-        if all_data:
-            template_text = "Prompts for this section are generated via LLM from a structured specification."
-            # Pass GALLERY_SECTIONS for nav links so the page can link out.
-            generate_section_html(NONCON_SECTION_CONFIG, all_data, template_text, GALLERY_SECTIONS)
-        else:
-            print(f"No image data in {section_data_file} to generate HTML page.")
-    else:
-        print(f"No data file found at {section_data_file}. Skipping noncon.html generation.")
-
-# --- END NONCON FUNCTIONS ---
+def parse_arguments() -> argparse.Namespace:
+    """Parses command-line arguments."""
+    parser = argparse.ArgumentParser(description="Generate a static gallery website with NovelAI images.")
+    parser.add_argument("--api-key", help="NovelAI API key (overrides .env or cached tokens).")
+    parser.add_argument("--no-generate", action="store_true", help="Skip image generation, only build HTML from existing data.")
+    parser.add_argument("--sections", nargs='+', help="Specify which sections to process (e.g., --sections women nsfw). Overrides other filters.")
+    parser.add_argument("--generate-nsfw", action="store_true", help="Only process sections marked as NSFW.")
+    parser.add_argument("--generate-noncon", action="store_true", help="Shortcut to only process the 'noncon' section.")
+    parser.add_argument("--create-env-template", action="store_true", help="Create a template .env file and exit.")
+    return parser.parse_args()
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate a static gallery website with NovelAI images")
-    parser.add_argument("--api-key", help="NovelAI API key (overrides .env or cached tokens)")
-    parser.add_argument("--no-generate", action="store_true", help="Skip image generation, only build website from existing data.")
-    parser.add_argument("--create-env-template", action="store_true", help="Create a template .env file and exit.")
-    parser.add_argument("--generate-nsfw", action="store_true", help="Only generate images and content for NSFW sections.")
-    parser.add_argument("--generate-noncon", action="store_true", help="Generate a special non-con gallery from prompts_gemini.json.")
-    args = parser.parse_args()
+    """Main execution function."""
+    args = parse_arguments()
 
     if args.create_env_template:
-        env_file_path = ".env"
-        if not os.path.exists(env_file_path):
-            with open(env_file_path, "w") as f: f.write("NAI_PERSISTENT_TOKEN=your_long_alphanumeric_token_here\n")
-            print(f"Created {env_file_path}.")
-        else: print(f"{env_file_path} already exists.")
-        return
-
-    setup_directories()
-
-    if args.generate_noncon:
-        print("--- Running in Non-Con Generation Mode ---")
-        process_noncon_section(args.api_key)
-        print(f"\nNon-con gallery generation complete. Page 'noncon.html' is in {os.path.abspath(OUTPUT_SITE_DIR)}")
+        if not os.path.exists(".env"):
+            with open(".env", "w") as f: f.write("NAI_PERSISTENT_TOKEN=your_token_here\n")
+            print("Created .env template file.")
+        else:
+            print(".env file already exists.")
         return
 
     try:
-        template_text = read_template()
-        artists = read_artists()
-        sections_to_process = GALLERY_SECTIONS
-        if args.generate_nsfw:
-            sections_to_process = [s for s in GALLERY_SECTIONS if s.get("is_nsfw", False)]
-            if not sections_to_process:
-                print("NSFW generation requested, but no NSFW sections are configured. Exiting.")
-                return
-            print("Processing NSFW sections only.")
+        config_manager = ConfigManager(SITE_CONFIG)
+        setup_directories(config_manager)
 
-        section_descriptions = {s["id"]: read_section_descriptions(s["file"]) for s in sections_to_process}
-        
-        headers = None
+        api_client = None
         if not args.no_generate:
-            if not artists: print("Warning: No artists found. Image generation will be limited.")
             try:
-                headers = login(args.api_key)
-            except Exception as e:
-                print(f"Login failed: {e}. Forcing --no-generate.")
+                api_client = NovelAI_API(args.api_key)
+            except ConnectionError:
+                print("Could not log in to NovelAI. Forcing --no-generate mode.")
                 args.no_generate = True
 
-        print("\n--- Processing Gallery Sections ---")
-        all_sections_data = {}
+        generator = SiteGenerator(config_manager, api_client)
+
+        # Determine which sections to process based on CLI flags
+        all_sections = config_manager.get_all_sections()
+        sections_to_process = list(all_sections.keys())
+
+        if args.sections:
+            sections_to_process = [s for s in args.sections if s in all_sections]
+            print(f"Processing specified sections: {sections_to_process}")
+        elif args.generate_noncon:
+            sections_to_process = ["noncon"]
+            print("Processing only the 'noncon' section.")
+        elif args.generate_nsfw:
+            sections_to_process = [s_id for s_id, s_conf in all_sections.items() if s_conf["is_nsfw"]]
+            print("Processing only NSFW sections.")
+
         if not args.no_generate:
-            for section_config in sections_to_process:
-                section_id = section_config["id"]
-                print(f"\nProcessing section: {section_config['name']}")
-                current_section_data = generate_section_images(section_config, section_descriptions.get(section_id, []), artists, template_text, headers)
-                all_sections_data[section_id] = current_section_data
+            for section_id in sections_to_process:
+                generator.process_section_images(section_id)
+        
+        generator.generate_all_html()
 
-        print("\n--- Generating HTML Pages ---")
-        # Process standard gallery sections
-        for section_config in sections_to_process:
-            section_id = section_config["id"]
-            section_data_file = f"{OUTPUT_IMAGES_DIR}/{section_id}_data.json"
-            if os.path.exists(section_data_file):
-                with open(section_data_file, "r") as f: images_data_for_html = json.load(f)
-                if images_data_for_html:
-                    generate_section_html(section_config, images_data_for_html, template_text, GALLERY_SECTIONS)
-                else: print(f"Data file for '{section_id}' is empty. Skipping HTML.")
-            else:
-                print(f"No data file for '{section_id}'. Skipping HTML.")
-
-        # Always check for and build noncon.html if its data exists
-        process_noncon_section(args.api_key, no_generate=True)
-
-        print("\n--- Finalizing Site ---")
-        for section_config in GALLERY_SECTIONS:
-            if section_config.get("is_nsfw", False):
-                generate_nsfw_landing_page(OUTPUT_SITE_DIR, section_config["id"], section_config["name"])
-
-        if GALLERY_SECTIONS:
-            first_sfw_section = next((s for s in GALLERY_SECTIONS if not s.get("is_nsfw", False)), None)
-            first_nsfw_section = next((s for s in GALLERY_SECTIONS if s.get("is_nsfw", False)), None)
-            redirect_target_url = None
-            if first_sfw_section: redirect_target_url = f"{first_sfw_section['id']}.html"
-            elif first_nsfw_section: redirect_target_url = f"{first_nsfw_section['id']}_landing.html"
-            if redirect_target_url: generate_redirect_html(f"{OUTPUT_SITE_DIR}/index.html", redirect_target_url)
-        else:
-            with open(f"{OUTPUT_SITE_DIR}/index.html", "w") as f: f.write("No gallery sections configured.")
-
-        print(f"\nWebsite generation complete. Files are in: {os.path.abspath(OUTPUT_SITE_DIR)}")
-
-    except FileNotFoundError as e:
-        print(f"Error: A required file was not found: {e}")
     except Exception as e:
         import traceback
-        print(f"An unexpected error occurred: {e}")
+        print(f"\nFATAL ERROR: An unexpected error occurred: {e}")
         traceback.print_exc()
 
 if __name__ == "__main__":

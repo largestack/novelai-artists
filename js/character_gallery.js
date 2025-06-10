@@ -1,13 +1,11 @@
 /**
  * Character Gallery JS - For NovelAI Character Galleries
+ * Refactored for clarity and bug fixes.
  */
 
-const GALLERY_IMAGE_THUMB_SCALE_PERCENT = 100;
-const THUMB_PATH = "https://f005.backblazeb2.com/file/novelai-images/thumb/";
-const FULL_PATH = "https://f005.backblazeb2.com/file/novelai-images/full/";
 const AGE_DISCLAIMER_KEY = 'ageDisclaimerAccepted_v1';
 const THEME_KEY = 'site_theme_v1';
-const HEADER_REVEAL_THRESHOLD_PX = 250; // Approx 3 small images. Adjust as needed.
+const HEADER_REVEAL_THRESHOLD_PX = 250;
 
 document.addEventListener('DOMContentLoaded', function() {
 
@@ -76,21 +74,18 @@ document.addEventListener('DOMContentLoaded', function() {
             initializeGallery();
         };
         exitBtn.onclick = () => {
-            const modalContent = document.getElementById('age-disclaimer-modal');
-            if (modalContent) modalContent.innerHTML = '<h2>Access Denied</h2><p>You must be 18 or older to view this content.</p>';
+            window.location.href = 'index.html';
         };
     }
 
     function initializeGallery() {
         const galleryEl = document.getElementById('gallery');
         const lightboxEl = document.getElementById('lightbox');
-        const lightboxContentEl = document.querySelector('.lightbox-content');
         const lightboxImgEl = document.getElementById('lightbox-img');
         const lightboxArtistEl = document.getElementById('lightbox-artist');
         const lightboxModelEl = document.getElementById('lightbox-model');
         const lightboxSeedEl = document.getElementById('lightbox-seed');
         const lightboxRelatedImagesContainer = document.getElementById('lightbox-related-images');
-        const favoriteTextEl = document.getElementById('favorite-text');
         const favoriteButtonEl = document.getElementById('favorite-button');
         const favoritesToggleBtn = document.getElementById('favorites-toggle');
         const closeBtn = document.querySelector('.lightbox .close');
@@ -107,7 +102,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        if (templateTextEl && typeof galleryData !== 'undefined' && galleryData.template) {
+        if (templateTextEl) {
             templateTextEl.textContent = galleryData.template;
         }
         
@@ -128,35 +123,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         if (modelSelectorEl) {
-            modelSelectorEl.innerHTML = '';
-            const allBtn = document.createElement('button');
-            allBtn.className = 'model-button';
-            allBtn.setAttribute('data-model', 'all');
-            allBtn.textContent = 'All Models';
-            allBtn.addEventListener('click', function() { filterByModel('all'); setActiveButton(this); });
-            modelSelectorEl.appendChild(allBtn);
-            
-            [...allModels].sort().forEach(model => {
-                const btn = document.createElement('button');
-                btn.className = 'model-button';
-                btn.setAttribute('data-model', model);
-                btn.textContent = modelNameMap[model];
-                btn.addEventListener('click', function() { filterByModel(model); setActiveButton(this); });
-                modelSelectorEl.appendChild(btn);
-            });
+            const sortedModels = [...allModels].sort((a,b) => (modelNameMap[a] || "").localeCompare(modelNameMap[b] || ""));
+            modelSelectorEl.innerHTML = `<button class="model-button active" data-model="all">All Models</button>` +
+            sortedModels.map(model => 
+                `<button class="model-button" data-model="${model}">${modelNameMap[model]}</button>`
+            ).join('');
 
-            const defaultModelId = 'nai-diffusion-4-5-full';
-            let defaultModelButton = modelSelectorEl.querySelector(`button[data-model="${defaultModelId}"]`);
-            if (defaultModelButton) setActiveButton(defaultModelButton);
-            else if (allBtn) setActiveButton(allBtn);
+            modelSelectorEl.addEventListener('click', (e) => {
+                if (e.target.matches('.model-button')) {
+                    modelSelectorEl.querySelectorAll('.model-button').forEach(btn => btn.classList.remove('active'));
+                    e.target.classList.add('active');
+                    filterGallery();
+                }
+            });
         }
         
-        function setActiveButton(btn) {
-            if (!modelSelectorEl || !btn) return;
-            modelSelectorEl.querySelectorAll('.model-button').forEach(el => el.classList.remove('active'));
-            btn.classList.add('active');
-        }
-
         function showToast(message) {
             let toast = document.getElementById('copy-toast-notification'); 
             if (!toast) {
@@ -171,21 +152,33 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         function toggleFavorite(imageId) {
-            const imageIdStr = imageId.toString();
-            const isNowFavorite = !favorites.has(imageIdStr);
-            if (isNowFavorite) favorites.add(imageIdStr); else favorites.delete(imageIdStr);
+            const imageIdStr = String(imageId);
+            if (favorites.has(imageIdStr)) {
+                favorites.delete(imageIdStr);
+            } else {
+                favorites.add(imageIdStr);
+            }
             localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favorites]));
-            const cardIcon = galleryEl.querySelector(`.image-card[data-id="${imageIdStr}"] .favorite-icon-card`);
-            if (cardIcon) cardIcon.classList.toggle('favorited', isNowFavorite);
-            if (currentLightboxImage && currentLightboxImage.id === imageId) updateFavoriteButtonUI(isNowFavorite);
-            if (showingFavorites && !isNowFavorite) filterGallery();
+            updateCardFavoriteIcon(imageIdStr);
+            if (currentLightboxImage && String(currentLightboxImage.id) === imageIdStr) {
+                updateLightboxFavoriteButton();
+            }
+            if (showingFavorites && !favorites.has(imageIdStr)) {
+                const card = galleryEl.querySelector(`.image-card[data-id="${imageIdStr}"]`);
+                if(card) card.remove();
+            }
         }
         
-        function updateFavoriteButtonUI(isFavorite) { 
-            if (favoriteButtonEl && favoriteTextEl) {
-                favoriteButtonEl.classList.toggle('favorited', isFavorite); 
-                favoriteTextEl.textContent = isFavorite ? 'Remove from Favorites' : 'Add to Favorites';
-            }
+        function updateCardFavoriteIcon(imageId) {
+             const cardIcon = galleryEl.querySelector(`.image-card[data-id="${imageId}"] .favorite-icon-card`);
+             if (cardIcon) cardIcon.classList.toggle('favorited', favorites.has(imageId));
+        }
+
+        function updateLightboxFavoriteButton() {
+            if (!favoriteButtonEl || !currentLightboxImage) return;
+            const isFavorite = favorites.has(String(currentLightboxImage.id));
+            favoriteButtonEl.classList.toggle('favorited', isFavorite);
+            favoriteButtonEl.querySelector('#favorite-text').textContent = isFavorite ? 'Remove from Favorites' : 'Add to Favorites';
         }
         
         if (favoritesToggleBtn) {
@@ -198,211 +191,176 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (searchBoxEl) {
-            searchBoxEl.addEventListener('input', function() {
-                currentSearchTerm = this.value.toLowerCase().trim();
+            searchBoxEl.addEventListener('input', () => {
+                currentSearchTerm = searchBoxEl.value.toLowerCase().trim();
                 clearTimeout(searchBoxEl.searchTimeout);
-                searchBoxEl.searchTimeout = setTimeout(() => { filterGallery(); }, 300);
+                searchBoxEl.searchTimeout = setTimeout(filterGallery, 300);
             });
-        }
-        
-        function filterGallery() {
-            const currentModel = modelSelectorEl ? (modelSelectorEl.querySelector('.model-button.active')?.getAttribute('data-model') || 'all') : 'all';
-            filterByModel(currentModel);
-        }
-        
-        function filterByModel(model) {
-            if (!galleryEl) return;
-            galleryEl.innerHTML = '';
-            loadedImagesCount = 0;
-            
-            let filteredImages = (model === 'all') ? [...galleryData.sectionImages] : [...(imagesByModel[model] || [])];
-            if (showingFavorites) {
-                filteredImages = filteredImages.filter(img => favorites.has(img.id.toString()));
-            }
-            if (currentSearchTerm) {
-                filteredImages = filteredImages.filter(img => {
-                    const term = currentSearchTerm;
-                    return (img.artist && img.artist.toLowerCase().includes(term)) ||
-                           (img.prompt && img.prompt.toLowerCase().includes(term)) ||
-                           ('character1' in img && img.character1.toLowerCase().includes(term)) ||
-                           ('character2' in img && img.character2.toLowerCase().includes(term));
-                });
-            }
-            
-            shuffledImages = filteredImages.sort(() => Math.random() - 0.5);
-            loadImages(24);
-            if (loadingEl) loadingEl.style.display = shuffledImages.length > loadedImagesCount ? 'block' : 'none';
         }
         
         let shuffledImages = [];
         let loadedImagesCount = 0;
         let currentLightboxImage = null;
+
+        function filterGallery() {
+            const activeModelButton = modelSelectorEl.querySelector('.model-button.active');
+            const model = activeModelButton ? activeModelButton.dataset.model : 'all';
+            
+            let filtered = (model === 'all') ? [...galleryData.sectionImages] : (imagesByModel[model] || []);
+            if (showingFavorites) {
+                filtered = filtered.filter(img => favorites.has(String(img.id)));
+            }
+            if (currentSearchTerm) {
+                filtered = filtered.filter(img => 
+                    (img.artist && img.artist.toLowerCase().includes(currentSearchTerm)) ||
+                    (img.prompt && img.prompt.toLowerCase().includes(currentSearchTerm)) ||
+                    ('character1' in img && img.character1.toLowerCase().includes(currentSearchTerm)) ||
+                    ('character2' in img && img.character2.toLowerCase().includes(currentSearchTerm))
+                );
+            }
+            
+            shuffledImages = filtered.sort(() => 0.5 - Math.random());
+            galleryEl.innerHTML = '';
+            loadedImagesCount = 0;
+            loadImages(24);
+        }
         
         function loadImages(count) {
             if (loadedImagesCount >= shuffledImages.length) {
                 if (loadingEl) loadingEl.style.display = 'none';
                 return;
             }
+
             const fragment = document.createDocumentFragment();
             const endIndex = Math.min(loadedImagesCount + count, shuffledImages.length);
             for (let i = loadedImagesCount; i < endIndex; i++) {
                 const img = shuffledImages[i];
                 const card = document.createElement('div');
                 card.className = 'image-card';
-                card.setAttribute('data-id', img.id);
-                const imgContainer = document.createElement('div');
-                imgContainer.className = 'image-container';
-                const favIconOnCard = document.createElement('div'); 
-                favIconOnCard.className = 'favorite-icon-card';
-                if (favorites.has(img.id.toString())) favIconOnCard.classList.add('favorited');
-                favIconOnCard.addEventListener('click', (e) => { e.stopPropagation(); toggleFavorite(img.id); });
-                imgContainer.appendChild(favIconOnCard);
-                const imgEl = document.createElement('img');
-                imgEl.src = THUMB_PATH + img.id + ".jpg";
-                imgEl.alt = "Gallery image thumbnail";
-                imgEl.loading = 'lazy';
-                imgEl.style.width = GALLERY_IMAGE_THUMB_SCALE_PERCENT + '%';
-                imgEl.style.height = 'auto';
-                imgContainer.appendChild(imgEl);
-                card.appendChild(imgContainer);
-                card.addEventListener('click', () => { openLightbox(img); });
+                card.dataset.id = img.id;
+                card.innerHTML = `
+                    <div class="image-container">
+                        <div class="favorite-icon-card ${favorites.has(String(img.id)) ? 'favorited' : ''}"></div>
+                        <img src="${galleryData.imagePaths.thumb}${img.id}.jpg" alt="Gallery thumbnail" loading="lazy">
+                    </div>`;
+                card.querySelector('.favorite-icon-card').addEventListener('click', (e) => { e.stopPropagation(); toggleFavorite(img.id); });
+                card.addEventListener('click', () => openLightbox(img));
                 fragment.appendChild(card);
             }
-            if (galleryEl) galleryEl.appendChild(fragment);
+            galleryEl.appendChild(fragment);
             loadedImagesCount = endIndex;
             if (loadingEl) loadingEl.style.display = loadedImagesCount < shuffledImages.length ? 'block' : 'none';
         }
         
         function openLightbox(img) {
             currentLightboxImage = img;
-            if (lightboxContentEl) lightboxContentEl.scrollTop = 0;
-            lightboxImgEl.src = FULL_PATH + img.id + ".jpg";
+            document.querySelector('.lightbox-content').scrollTop = 0;
+            lightboxImgEl.src = `${galleryData.imagePaths.full}${img.id}.jpg`;
             
             lightboxPromptArea.innerHTML = ''; // Clear previous content
 
-            const createPromptBlock = (title, text, isCombined = false) => {
-                const container = document.createElement('div');
-                container.className = 'prompt-container';
-                if (isCombined) container.style.borderTop = "2px solid var(--button-border)";
-                if (isCombined) container.style.paddingTop = "1rem";
-                
-                const h4 = document.createElement('h4');
-                h4.textContent = title;
-                container.appendChild(h4);
-
+            const createPromptBlock = (title, text) => {
                 const pre = document.createElement('pre');
                 pre.textContent = text;
-                container.appendChild(pre);
-
                 const button = document.createElement('button');
                 button.className = 'copy-button';
                 button.textContent = `Copy ${title}`;
-                button.addEventListener('click', () => {
-                    navigator.clipboard.writeText(text).then(() => showToast(`${title} copied!`));
-                });
+                button.onclick = () => navigator.clipboard.writeText(text).then(() => showToast(`${title} copied!`));
+                
+                const container = document.createElement('div');
+                container.className = 'prompt-container';
+                container.innerHTML = `<h4>${title}</h4>`;
+                container.appendChild(pre);
                 container.appendChild(button);
                 return container;
             };
 
-            // FIXED CONDITION - check for actual content, not just existence of keys
-            if (img.character1 && img.character2) {
-                // New Format (noncon.html)
-                const combinedPrompt = `by ${img.artist}, very aesthetic, masterpiece, absurdres, no text, ${img.prompt}, ${img.character1}, ${img.character2}`;
-                
-                lightboxPromptArea.appendChild(createPromptBlock('Full Combined Prompt', combinedPrompt, false));
-                lightboxPromptArea.appendChild(createPromptBlock('Scene Prompt', img.prompt, true));
-                lightboxPromptArea.appendChild(createPromptBlock('Character 1', img.character1, false));
-                lightboxPromptArea.appendChild(createPromptBlock('Character 2', img.character2, false));
-
+            /*** BUG FIX: Conditional prompt display ***/
+            if ('character1' in img && 'character2' in img) {
+                // V4 Style (noncon)
+                lightboxPromptArea.appendChild(createPromptBlock('Scene Prompt', img.prompt));
+                lightboxPromptArea.appendChild(createPromptBlock('Character 1', img.character1));
+                lightboxPromptArea.appendChild(createPromptBlock('Character 2', img.character2));
             } else {
-                // Old Format (backward compatibility)
-                const tagsContainer = document.createElement('div');
-                tagsContainer.className = 'tags-container-modal';
-                const tags = img.prompt.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
-                tags.forEach(tag => {
-                    const tagSpan = document.createElement('span');
-                    tagSpan.className = 'clickable-tag-modal';
-                    tagSpan.textContent = tag;
-                    tagSpan.title = `Search for "${tag}"`;
-                    tagSpan.addEventListener('click', () => {
-                        if (searchBoxEl) {
-                            searchBoxEl.value = tag;
-                            searchBoxEl.dispatchEvent(new Event('input', { bubbles: true }));
-                        }
-                        closeLightbox();
-                    });
-                    tagsContainer.appendChild(tagSpan);
-                    tagsContainer.appendChild(document.createTextNode(' '));
-                });
-                lightboxPromptArea.appendChild(tagsContainer);
-                lightboxPromptArea.appendChild(createPromptBlock('Prompt', img.prompt, false));
+                // V3 Style (standard galleries)
+                 lightboxPromptArea.appendChild(createPromptBlock('Full Prompt', img.prompt));
             }
 
-            if (lightboxArtistEl) lightboxArtistEl.textContent = img.artist;
-            if (lightboxModelEl) lightboxModelEl.textContent = img.modelName;
-            if (lightboxSeedEl) lightboxSeedEl.textContent = img.seed;
-            updateFavoriteButtonUI(favorites.has(img.id.toString()));
-
-            if (lightboxArtistEl) {
-                lightboxArtistEl.onclick = () => { if (img.artist) { navigator.clipboard.writeText(img.artist).then(() => showToast(`Copied artist: ${img.artist}`)).catch(err => console.error('Failed to copy artist:', err)); } };
-            }
+            lightboxArtistEl.textContent = img.artist;
+            lightboxModelEl.textContent = img.modelName;
+            lightboxSeedEl.textContent = img.seed;
+            updateLightboxFavoriteButton();
             
-            if (lightboxRelatedImagesContainer) {
-                lightboxRelatedImagesContainer.innerHTML = '';
-                const relatedImages = galleryData.sectionImages.filter(relImg => relImg.id !== img.id && relImg.artist === img.artist && relImg.model === img.model).slice(0, 20); 
-                if (relatedImages.length > 0) {
-                    const relatedTitle = document.createElement('h4');
-                    relatedTitle.textContent = 'More from this artist & model:';
-                    lightboxRelatedImagesContainer.appendChild(relatedTitle);
-                    const relatedGrid = document.createElement('div');
-                    relatedGrid.className = 'related-images-grid';
-                    relatedImages.forEach(relImg => {
-                        const relImgEl = document.createElement('img');
-                        relImgEl.src = THUMB_PATH + relImg.id + ".jpg";
-                        relImgEl.alt = "Related image thumbnail";
-                        relImgEl.className = 'related-image';
-                        if (favorites.has(relImg.id.toString())) relImgEl.classList.add('favorited');
-                        relImgEl.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(relImg); });
-                        relatedGrid.appendChild(relImgEl);
-                    });
-                    lightboxRelatedImagesContainer.appendChild(relatedGrid);
-                }
+            lightboxRelatedImagesContainer.innerHTML = ''; // Clear and rebuild related images
+            const relatedImages = galleryData.sectionImages
+                .filter(rel => rel.id !== img.id && rel.artist === img.artist && rel.model === img.model)
+                .slice(0, 8);
+            
+            if (relatedImages.length > 0) {
+                const relatedGrid = document.createElement('div');
+                relatedGrid.className = 'related-images-grid';
+                relatedGrid.innerHTML = relatedImages.map(relImg => `
+                    <img src="${galleryData.imagePaths.thumb}${relImg.id}.jpg" 
+                         alt="Related thumbnail" 
+                         class="related-image ${favorites.has(String(relImg.id)) ? 'favorited' : ''}" 
+                         data-related-id="${relImg.id}">
+                `).join('');
+                lightboxRelatedImagesContainer.innerHTML = '<h4>More from this artist & model:</h4>';
+                lightboxRelatedImagesContainer.appendChild(relatedGrid);
             }
-            if (lightboxEl) lightboxEl.classList.add('active');
+
+            lightboxEl.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
         
         function closeLightbox() {
-            if (lightboxEl) lightboxEl.classList.remove('active');
-            if (lightboxImgEl) lightboxImgEl.src = '';
+            lightboxEl.classList.remove('active');
+            lightboxImgEl.src = '';
             currentLightboxImage = null;
             document.body.style.overflow = '';
         }
         
-        if (favoriteButtonEl) favoriteButtonEl.addEventListener('click', () => { if (currentLightboxImage) toggleFavorite(currentLightboxImage.id); });
-        if (lightboxImgEl && fullscreenOverlay && fullscreenImg) {
-            lightboxImgEl.addEventListener('click', () => { fullscreenImg.src = lightboxImgEl.src; fullscreenOverlay.classList.add('visible'); });
-        }
-        if (fullscreenOverlay) fullscreenOverlay.addEventListener('click', () => { fullscreenOverlay.classList.remove('visible'); fullscreenImg.src = ''; });
-        if (closeBtn) closeBtn.addEventListener('click', closeLightbox);
-        if (lightboxEl) lightboxEl.addEventListener('click', (e) => { if (e.target === lightboxEl) closeLightbox(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && lightboxEl && lightboxEl.classList.contains('active')) closeLightbox(); });
+        // --- Event Listeners ---
+        favoriteButtonEl.addEventListener('click', () => { if (currentLightboxImage) toggleFavorite(currentLightboxImage.id); });
+        lightboxImgEl.addEventListener('click', () => { fullscreenImg.src = lightboxImgEl.src; fullscreenOverlay.classList.add('visible'); });
+        fullscreenOverlay.addEventListener('click', () => fullscreenOverlay.classList.remove('visible'));
+        closeBtn.addEventListener('click', closeLightbox);
+        lightboxEl.addEventListener('click', (e) => { if (e.target === lightboxEl) closeLightbox(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && lightboxEl.classList.contains('active')) closeLightbox(); });
         window.addEventListener('scroll', () => {
-            if (!loadingEl || loadingEl.style.display === 'none') return; 
-            if (window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 500) { if (loadedImagesCount < shuffledImages.length) loadImages(12); }
+            if (loadingEl.style.display !== 'none' && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 500) {
+                loadImages(12);
+            }
+        });
+        lightboxArtistEl.addEventListener('click', () => {
+             if (currentLightboxImage && currentLightboxImage.artist) {
+                navigator.clipboard.writeText(currentLightboxImage.artist).then(() => showToast(`Copied artist!`));
+             }
+        });
+        lightboxRelatedImagesContainer.addEventListener('click', (e) => {
+            if(e.target.matches('.related-image')) {
+                const relatedId = e.target.dataset.relatedId;
+                const relatedImgObject = galleryData.sectionImages.find(img => String(img.id) === relatedId);
+                if (relatedImgObject) openLightbox(relatedImgObject);
+            }
         });
         
+        // Initial load
         filterGallery();
     }
 
     function mainInit() {
         if (typeof galleryData === 'undefined' || !galleryData.sectionImages) {
             console.error("galleryData is not defined. Cannot initialize gallery.");
+            document.body.innerHTML = 'Error: Gallery data is missing.';
             return;
         }
-        const isNsfw = galleryData.isNsfwSection || false;
         const disclaimerAccepted = localStorage.getItem(AGE_DISCLAIMER_KEY) === 'true';
-        if (isNsfw && !disclaimerAccepted) showAgeDisclaimer(); else initializeGallery();
+        if (galleryData.isNsfwSection && !disclaimerAccepted) {
+            showAgeDisclaimer();
+        } else {
+            initializeGallery();
+        }
     }
 
     mainInit();

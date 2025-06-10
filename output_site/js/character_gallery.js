@@ -304,8 +304,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return container;
             };
 
-            // FIXED CONDITION - check for actual content, not just existence of keys
-            if (img.character1 && img.character2) {
+            // --- CORRECTED LOGIC ---
+            // Use the 'in' operator to check for property existence, not truthiness.
+            // This is the robust way to handle this in JavaScript.
+            if ('character1' in img && 'character2' in img) {
                 // New Format (noncon.html)
                 const combinedPrompt = `by ${img.artist}, very aesthetic, masterpiece, absurdres, no text, ${img.prompt}, ${img.character1}, ${img.character2}`;
                 
@@ -338,15 +340,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 lightboxPromptArea.appendChild(createPromptBlock('Prompt', img.prompt, false));
             }
 
+            // The rest of the function remains the same...
             if (lightboxArtistEl) lightboxArtistEl.textContent = img.artist;
             if (lightboxModelEl) lightboxModelEl.textContent = img.modelName;
             if (lightboxSeedEl) lightboxSeedEl.textContent = img.seed;
             updateFavoriteButtonUI(favorites.has(img.id.toString()));
-
             if (lightboxArtistEl) {
                 lightboxArtistEl.onclick = () => { if (img.artist) { navigator.clipboard.writeText(img.artist).then(() => showToast(`Copied artist: ${img.artist}`)).catch(err => console.error('Failed to copy artist:', err)); } };
             }
-            
             if (lightboxRelatedImagesContainer) {
                 lightboxRelatedImagesContainer.innerHTML = '';
                 const relatedImages = galleryData.sectionImages.filter(relImg => relImg.id !== img.id && relImg.artist === img.artist && relImg.model === img.model).slice(0, 20); 
@@ -371,6 +372,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (lightboxEl) lightboxEl.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
+
         
         function closeLightbox() {
             if (lightboxEl) lightboxEl.classList.remove('active');
