@@ -73,6 +73,15 @@ SITE_CONFIG = {
         "is_nsfw": True,
         "type": "v4",
         "hidden": True # This section will not appear in the navigation
+    },
+    "noncon2": {
+        "name": "Non-Con Gallery 2",
+        "prompt_file": "prompts_gemini_v4.json",
+        "max_images": 24000,
+        "base_image_path_segment": "images/noncon2",
+        "is_nsfw": True,
+        "type": "v4",
+        "hidden": True # This section will not appear in the navigation
     }
 }
 
@@ -283,7 +292,7 @@ class SiteGenerator:
     def _create_v4_payload(self, prompt_obj: Dict[str, str], artist: str, seed: int) -> Dict[str, Any]:
         """Creates the API payload for multi-character (V4-style) generation."""
         artist = "{artist:" + artist + "}" 
-        base_prompt = f"{artist}, very aesthetic, masterpiece, absurdres, no text, {prompt_obj['prompt']}"
+        base_prompt = f"{artist}, very aesthetic, masterpiece, absurdres, no text, uncensored, {prompt_obj['prompt']}"
         if "character1" not in prompt_obj or "character2" not in prompt_obj:
             print("Warning: Missing character prompts in V4 payload. Skipping generation.")
             return {}
@@ -591,6 +600,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--sections", nargs='+', help="Specify which sections to process (e.g., --sections women nsfw). Overrides other filters.")
     parser.add_argument("--generate-nsfw", action="store_true", help="Only process sections marked as NSFW.")
     parser.add_argument("--generate-noncon", action="store_true", help="Shortcut to only process the 'noncon' section.")
+    parser.add_argument("--generate-noncon2", action="store_true", help="Shortcut to only process the 'noncon2' section.")
     parser.add_argument("--create-env-template", action="store_true", help="Create a template .env file and exit.")
     return parser.parse_args()
 
@@ -630,6 +640,9 @@ def main():
         elif args.generate_noncon:
             sections_to_process = ["noncon"]
             print("Processing only the 'noncon' section.")
+        elif args.generate_noncon2:
+            sections_to_process = ["noncon2"]
+            print("Processing only the 'noncon2' section.")
         elif args.generate_nsfw:
             sections_to_process = [s_id for s_id, s_conf in all_sections.items() if s_conf["is_nsfw"]]
             print("Processing only NSFW sections.")
