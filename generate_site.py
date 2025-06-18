@@ -82,6 +82,15 @@ SITE_CONFIG = {
         "is_nsfw": True,
         "type": "v4",
         "hidden": True # This section will not appear in the navigation
+    },
+    "noncon3": {
+        "name": "Non-Con Gallery 2",
+        "prompt_file": "prompts_gemini_v5.json",
+        "max_images": 5000,
+        "base_image_path_segment": "images/noncon3",
+        "is_nsfw": True,
+        "type": "v4",
+        "hidden": True # This section will not appear in the navigation
     }
 }
 
@@ -601,6 +610,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--generate-nsfw", action="store_true", help="Only process sections marked as NSFW.")
     parser.add_argument("--generate-noncon", action="store_true", help="Shortcut to only process the 'noncon' section.")
     parser.add_argument("--generate-noncon2", action="store_true", help="Shortcut to only process the 'noncon2' section.")
+    parser.add_argument("--generate-noncon3", action="store_true", help="Shortcut to only process the 'noncon3' section.")
     parser.add_argument("--create-env-template", action="store_true", help="Create a template .env file and exit.")
     return parser.parse_args()
 
@@ -643,6 +653,9 @@ def main():
         elif args.generate_noncon2:
             sections_to_process = ["noncon2"]
             print("Processing only the 'noncon2' section.")
+        elif args.generate_noncon3:
+            sections_to_process = ["noncon3"]
+            print("Processing only the 'noncon3' section.")
         elif args.generate_nsfw:
             sections_to_process = [s_id for s_id, s_conf in all_sections.items() if s_conf["is_nsfw"]]
             print("Processing only NSFW sections.")
