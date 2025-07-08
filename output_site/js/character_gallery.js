@@ -309,10 +309,10 @@ document.addEventListener('DOMContentLoaded', function() {
             // This is the robust way to handle this in JavaScript.
             if ('character1' in img && 'character2' in img) {
                 // New Format (noncon.html)
-                const combinedPrompt = `by ${img.artist}, very aesthetic, masterpiece, absurdres, no text, ${img.prompt}, ${img.character1}, ${img.character2}`;
+                const combinedPrompt = `{artist:${img.artist}}, very aesthetic, masterpiece, absurdres, no text, ${img.prompt}, ${img.character1}, ${img.character2}`;
                 
                 lightboxPromptArea.appendChild(createPromptBlock('Full Combined Prompt', combinedPrompt, false));
-                lightboxPromptArea.appendChild(createPromptBlock('Scene Prompt', img.prompt, true));
+                lightboxPromptArea.appendChild(createPromptBlock('Scene Prompt', `{artist:${img.artist}}, ` + img.prompt, true));
                 lightboxPromptArea.appendChild(createPromptBlock('Character 1', img.character1, false));
                 lightboxPromptArea.appendChild(createPromptBlock('Character 2', img.character2, false));
 
