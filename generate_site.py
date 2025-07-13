@@ -91,6 +91,24 @@ SITE_CONFIG = {
         "is_nsfw": True,
         "type": "v4",
         "hidden": True # This section will not appear in the navigation
+    },
+    "noncon5": {
+        "name": "Non-Con Gallery 4",
+        "prompt_file": "prompts_gemini_v6.json",
+        "max_images": 6000,
+        "base_image_path_segment": "images/noncon5",
+        "is_nsfw": True,
+        "type": "v4",
+        "hidden": True # This section will not appear in the navigation
+    },
+    "noncon7": {
+        "name": "Non-Con Gallery 7",
+        "prompt_file": "prompts_grok_inspiration_v1.json",
+        "max_images": 6000,
+        "base_image_path_segment": "images/noncon7",
+        "is_nsfw": True,
+        "type": "v4",
+        "hidden": True # This section will not appear in the navigation
     }
 }
 
@@ -300,6 +318,12 @@ class SiteGenerator:
 
     def _create_v4_payload(self, prompt_obj: Dict[str, str], artist: str, seed: int) -> Dict[str, Any]:
         """Creates the API payload for multi-character (V4-style) generation."""
+
+        # Validate keys
+        if "prompt" not in prompt_obj or not prompt_obj["prompt"]:
+            print("Warning: Missing 'prompt' key in V4 payload. Skipping generation.")
+            return {}
+
         artist = "{artist:" + artist + "}" 
         base_prompt = f"{artist}, very aesthetic, masterpiece, absurdres, no text, uncensored, {prompt_obj['prompt']}"
         if "character1" not in prompt_obj or "character2" not in prompt_obj:
@@ -433,6 +457,10 @@ class SiteGenerator:
                 if filename_base in processed_ids: continue
                 payload = self._create_v3_payload(prompt_data, artist, seed, config["is_nsfw"])
             
+            if payload == {}:  # Only proceed if payload is valid
+                print(f"  Skipping generation for {filename_base} (invalid).")
+                continue
+
             print(f"  Generating image for: {filename_base} (seed: {seed})")
             image_bytes = self.api.generate(payload)
 
@@ -611,6 +639,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--generate-noncon", action="store_true", help="Shortcut to only process the 'noncon' section.")
     parser.add_argument("--generate-noncon2", action="store_true", help="Shortcut to only process the 'noncon2' section.")
     parser.add_argument("--generate-noncon3", action="store_true", help="Shortcut to only process the 'noncon3' section.")
+    parser.add_argument("--generate-noncon5", action="store_true", help="Shortcut to only process the 'noncon5' section.")
+    parser.add_argument("--generate-noncon7", action="store_true", help="Shortcut to only process the 'noncon7' section.")
     parser.add_argument("--create-env-template", action="store_true", help="Create a template .env file and exit.")
     return parser.parse_args()
 
@@ -656,6 +686,12 @@ def main():
         elif args.generate_noncon3:
             sections_to_process = ["noncon3"]
             print("Processing only the 'noncon3' section.")
+        elif args.generate_noncon5:
+            sections_to_process = ["noncon5"]
+            print("Processing only the 'noncon5' section.")
+        elif args.generate_noncon7:
+            sections_to_process = ["noncon7"]
+            print("Processing only the 'noncon7' section.")
         elif args.generate_nsfw:
             sections_to_process = [s_id for s_id, s_conf in all_sections.items() if s_conf["is_nsfw"]]
             print("Processing only NSFW sections.")

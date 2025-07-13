@@ -1,5 +1,4 @@
-import google.generativeai as genai
-from google.generativeai import types
+from openai import OpenAI
 import json
 import os
 import time
@@ -7,22 +6,44 @@ import re
 import random
 
 # --- CONFIGURATION ---
-# NOTE: "Gemini 2.5 Flash" is not an official model name as of June 2025.
-# The latest available flash model is used instead.
-#MODEL_NAME = "gemini-1.5-flash-001" 
-#MODEL_NAME = "gemini-2.5-flash-preview-05-20"  # Use the latest flash model available
-MODEL_NAME = "gemini-2.5-pro-preview-06-05"  # Use the latest flash model available
-JSON_FILE_PATH = "prompts_gemini_v5.json"
+MODELS = [
+    (1.0, "x-ai/grok-3"),
+]
+# Overrides for default params
+MODEL_PARAMS = {
+    "x-ai/grok-3": {
+        #"temperature": 1.0
+    },
+}
+JSON_FILE_PATH = "prompts_grok_inspiration_v1.json"
 TARGET_PROMPT_COUNT = 5000 # The total number of prompts you want in the file
 PROMPTS_PER_GENERATION = 15 # How many prompts to ask for in each API call
 
-def configure_api():
-    """Checks for and configures the Gemini API key."""
-    api_key = os.getenv("GOOGLE-API-KEY")
+def weighted_choice(choices):
+    """
+    Selects an item from a list of (weight, item) tuples.
+    """
+    total_weight = sum(w for w, _ in choices)
+    r = random.uniform(0, total_weight)
+    upto = 0
+    for w, c in choices:
+        if upto + w >= r:
+            return c
+        upto += w
+    return choices[-1][1] # Should not happen
+
+def configure_client():
+    """Checks for and configures the OpenRouter API key and returns a client."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        raise ValueError("GOOGLE-API-KEY environment variable not set. Please set it to your API key.")
-    genai.configure(api_key=api_key)
-    print("Gemini API configured successfully.")
+        raise ValueError("OPENROUTER_API_KEY environment variable not set. Please set it to your API key.")
+    
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+    print("OpenRouter client configured successfully.")
+    return client
 
 def load_prompts(filepath):
     """Loads existing prompts from a JSON file. Returns an empty list if not found."""
@@ -110,14 +131,14 @@ def clean_and_parse_json(text_response):
 
 def main():
     """Main function to generate and save prompts."""
-    configure_api()
+    client = configure_client()
 
     # --- CHAT HISTORY SETUP ---
     # This history primes the model with our successful interaction to guide its output.
     # read prompts_inspiration.txt for examples of scene settings
     # The {{examples}} placeholder will be replaced with actual examples later.
     #with open("prompts_inspiration_subset.txt", "r", encoding="utf-8") as f:
-    with open("prompts_inspiration.txt", "r", encoding="utf-8") as f:
+    with open("inspiration_v1.txt", "r", encoding="utf-8") as f:
         examples = f.readlines()
     examples = [line.strip() for line in examples if line.strip()]  # Clean up
     # Shuffle
@@ -245,33 +266,6 @@ AND IT MUST END AT LAST ENTRY OF: "source_setting_examples_index": "{{PROMPTS_PE
     # --- GENERATION LOOP ---
     all_prompts = load_prompts(JSON_FILE_PATH)
     
-    model = genai.GenerativeModel(MODEL_NAME,
-        safety_settings=[
-            {
-                "category": "HARM_CATEGORY_HARASSMENT",
-                "threshold": "BLOCK_NONE",
-            },
-            {
-                "category": "HARM_CATEGORY_HATE_SPEECH",
-                "threshold": "BLOCK_NONE",
-            },
-            {
-                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                "threshold": "BLOCK_NONE",
-            },
-            {
-                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                "threshold": "BLOCK_NONE",
-            },
-        ],
-        generation_config=types.GenerationConfig(
-            temperature=1.0,  # Adjust temperature for creativity  
-            max_output_tokens=50000,  # Allow enough tokens for detailed responses
-        ),
-        system_instruction=system,
-    )
-    
-
     while len(all_prompts) < TARGET_PROMPT_COUNT:
         # Deep copy the chat history to avoid modifying the original
         from copy import deepcopy
@@ -311,18 +305,37 @@ AND IT MUST END AT LAST ENTRY OF: "source_setting_examples_index": "{{PROMPTS_PE
         print(f"\nCurrently have {current_count} prompts. Target is {TARGET_PROMPT_COUNT}.")
         print(f"Requesting {PROMPTS_PER_GENERATION} more prompts from the model...")
 
+        # Select a model and its parameters
+        model_name = weighted_choice(MODELS)
+        model_params = MODEL_PARAMS.get(model_name, {})
+        print(f"Selected model: {model_name} with params: {model_params}")
+
         retry_count = 20
         while retry_count > 0 and len(all_prompts) < TARGET_PROMPT_COUNT:
             try:
                 # The new request to the model
-                generation_request = f"Excellent. Please generate {PROMPTS_PER_GENERATION} more prompts in the same JSON list format, continuing the same themes and level of detail. Do not add any commentary, just the JSON."
+                messages = [
+                    {"role": "system", "content": system}
+                ]
+                # Convert history format
+                for entry in history:
+                    messages.append({"role": entry["role"], "content": entry["parts"][0]})
+
+                completion_params = {
+                    "model": model_name,
+                    "messages": messages,
+                    "max_tokens": 8192,
+                }
+                # Add model-specific parameters
+                completion_params.update(model_params)
+
+                response = client.chat.completions.create(**completion_params)
                 
-                chat = model.start_chat(history=history.copy())
-                response = chat.send_message(generation_request)
-                newly_generated_prompts = clean_and_parse_json(response.text)
+                response_text = response.choices[0].message.content
+                newly_generated_prompts = clean_and_parse_json(response_text)
 
                 # Log the raw response for debugging
-                print(f"Raw response from model: {response.text}")
+                print(f"Raw response from model: {response_text}")
 
                 if newly_generated_prompts and isinstance(newly_generated_prompts, list) and len(newly_generated_prompts) > 0 and all(isinstance(entry, dict) for entry in newly_generated_prompts):
                     # Validate first entry
@@ -334,10 +347,6 @@ AND IT MUST END AT LAST ENTRY OF: "source_setting_examples_index": "{{PROMPTS_PE
                     if first_entry['source_setting_examples_index'] != "0" and first_entry['source_setting_examples_index'] != 0:
                         print(f"First entry's source_setting_examples_index is {first_entry['source_setting_examples_index']}, expected 0.")
                         raise ValueError("First entry's source_setting_examples_index does not match expected value.")
-                    
-                    #if len(newly_generated_prompts) > PROMPTS_PER_GENERATION:
-                    #    print(f"Generated more than {PROMPTS_PER_GENERATION} prompts: {len(newly_generated_prompts)}. Trimming to {PROMPTS_PER_GENERATION}.")
-                    #    newly_generated_prompts = newly_generated_prompts[:PROMPTS_PER_GENERATION]
 
                     all_prompts.extend(newly_generated_prompts)
                     save_prompts(JSON_FILE_PATH, all_prompts)
@@ -348,7 +357,7 @@ AND IT MUST END AT LAST ENTRY OF: "source_setting_examples_index": "{{PROMPTS_PE
                     print("Could not get a valid list of prompts from the model on this attempt. Trying again.")
 
             except Exception as e:
-                print(f"Retry {10 - retry_count} failed with error: {e}")
+                print(f"Retry {20 - retry_count} failed with error: {e}")
                 print("Waiting for 2 seconds before retrying...")
                 time.sleep(2) # Wait a bit longer if there's a serious API error
 
@@ -363,5 +372,3 @@ AND IT MUST END AT LAST ENTRY OF: "source_setting_examples_index": "{{PROMPTS_PE
 
 if __name__ == "__main__":
     main()
-
-
