@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NovelAI Story Gallery</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <div class="logo-container">
+            <h1>NovelAI Story Gallery</h1>
+        </div>
+        <div class="controls">
+            <button id="theme-toggle" class="theme-button" title="Toggle Dark/Light Mode">🌙</button>
+        </div>
+    </header>
+    
+    <div id="story-grid" class="story-grid">
+        <!-- Story grid will be populated by JavaScript -->
+    </div>
+    
+    <div id="story-viewer" class="story-viewer" style="display: none;">
+        <div class="story-controls">
+            <button id="back-to-grid">← Back to Stories</button>
+            <div class="story-navigation">
+                <button id="prev-story">← Previous Story</button>
+                <span id="story-counter"></span>
+                <button id="next-story">Next Story →</button>
+            </div>
+        </div>
+        <div id="story-content" class="story-content">
+            <!-- Story images will be populated here -->
+        </div>
+    </div>
+    
+    <script src="js/stories.js"></script>
+</body>
+</html>
